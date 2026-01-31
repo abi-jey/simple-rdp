@@ -2,7 +2,10 @@
 RDP Client - Main client class for establishing RDP connections.
 """
 
-from asyncio import StreamReader, StreamWriter, open_connection
+import ssl
+from asyncio import StreamReader
+from asyncio import StreamWriter
+from asyncio import open_connection
 from logging import getLogger
 from typing import Self
 
@@ -49,6 +52,7 @@ class RDPClient:
         self._input = InputHandler()
         self._tcp_reader: StreamReader
         self._tcp_writer: StreamWriter
+        self.connection_properties = {}
 
     @property
     def host(self) -> str:
@@ -83,10 +87,22 @@ class RDPClient:
             ConnectionError: If connection cannot be established.
         """
         await self._start_tcp_connection()
+        await self._start_x224()
+        if self.connection_properties.get("protocol") in [b"\x00\x00\x00\x02", b"\x00\x00\x00\x01"]:
+            await self._upgdate_to_tls()
+        if self.connection_properties.get("protocol") == b"\x00\x00\x00\x02":
+            await self._start_nla()
+        else:
+            raise ConnectionError("Unsupported RDP protocol selected by server.")
 
     async def disconnect(self) -> None:
         """Disconnect from the RDP server."""
-        # TODO: Implement disconnection logic
+        if self._tcp_writer:
+            self._tcp_writer.close()
+            await self._tcp_writer.wait_closed()
+        if self._tcp_reader:
+            self._tcp_reader = None  # type: ignore[assignment]
+
         self._connected = False
 
     async def __aenter__(self) -> Self:
@@ -115,5 +131,69 @@ class RDPClient:
             self._tcp_writer = writer
 
         except Exception as e:
-            logger.error(f"Failed to connect to RDP server: {e}")
+            logger.exception(f"Failed to connect to RDP server: {e}")
             raise ConnectionError(f"Could not connect to {self._host}:{self._port}") from e
+
+    async def _start_x224(self) -> None:
+        """
+        Send an X.224 packet to the RDP server.
+
+        Args:
+            data: The packet data to send.
+        """
+        cookie = b"Cookie: mstshash=user\r\n"
+        neg = b"\x01\x00\x08\x00\x03\x00\x00\x00"
+        x224_length = 6 + len(cookie) + len(neg)
+        x224_header = bytes([x224_length, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00])
+
+        tpkt_length = 4 + len(x224_header) + len(cookie) + len(neg)
+        tpkt_header = b"\x03\x00" + tpkt_length.to_bytes(2, "big")
+
+        data = tpkt_header + x224_header + cookie + neg
+        self._tcp_writer.write(data)
+        await self._tcp_writer.drain()
+        logger.info("Sent X.224 packet to RDP server.")
+        response = await self._tcp_reader.read(1024)
+        protocol = await self._parse_x224_response(response)
+        self.connection_properties["protocol"] = protocol
+        logger.info(f"X.224 negotiation completed with protocol: {protocol}")
+
+    async def _parse_x224_response(self, data: bytes) -> bytes:
+        """
+        Parse the X.224 response from the RDP server.
+        """
+        if len(data) < 11:
+            raise ConnectionError("Invalid X.224 response from server.")
+        type_code = data[11]
+        if type_code not in (0x02, 0x03):
+            raise ConnectionError("Unexpected X.224 response type from server.")
+        if type_code == 0x02:
+            selected_proto = data[15:19]
+            selected_proto = selected_proto[::-1]  # reverse to little-endian
+            logger.debug(f"Server selected protocol: {selected_proto}")
+            return selected_proto
+        if type_code == 0x03:
+            logger.info(f"Server requested RDP negotiation failed failure code: {data[14]}")
+            raise ConnectionError("RDP negotiation failed as per server response.")
+        raise ConnectionError(f"Unhandled X.224 response type: data: {data}")
+
+    async def _upgdate_to_tls(self) -> None:
+        """
+        Upgrade the TCP connection to TLS.
+        """
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        logger.info("Starting TLS Handshake...")
+        try:
+            await self._tcp_writer.start_tls(sslcontext=context, server_hostname=self._host)
+            logger.info("TLS Handshake successful.")
+        except Exception as e:
+            logger.error(f"TLS Handshake failed: {e}")
+            raise ConnectionError("TLS Handshake failed.") from e
+
+    async def _start_nla(self) -> None:
+        """
+        Start Network Level Authentication (NLA).
+        """
+        logger.info("Starting NLA authentication...")

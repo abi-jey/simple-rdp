@@ -3,7 +3,8 @@ Input Handler - Transmits mouse and keyboard input to RDP sessions.
 """
 
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
+from enum import auto
 from logging import getLogger
 
 logger = getLogger(__name__)

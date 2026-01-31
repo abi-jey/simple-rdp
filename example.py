@@ -10,11 +10,15 @@ This example demonstrates:
 """
 
 import asyncio
+import logging
+
+from rich.logging import RichHandler
 
 from simple_rdp import RDPClient
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[RichHandler()])
     async with RDPClient(
         host="192.168.1.243",
         username="abja",

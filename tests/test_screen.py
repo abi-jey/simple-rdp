@@ -2,7 +2,8 @@
 
 import pytest
 
-from simple_rdp.screen import ScreenBuffer, ScreenCapture
+from simple_rdp.screen import ScreenBuffer
+from simple_rdp.screen import ScreenCapture
 
 
 class TestScreenBuffer:

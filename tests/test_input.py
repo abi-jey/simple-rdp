@@ -2,7 +2,9 @@
 
 import pytest
 
-from simple_rdp.input import InputHandler, KeyModifier, MouseButton
+from simple_rdp.input import InputHandler
+from simple_rdp.input import KeyModifier
+from simple_rdp.input import MouseButton
 
 
 class TestMouseButton:
