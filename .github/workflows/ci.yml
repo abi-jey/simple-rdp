@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Test the Rust extension
+  test-rle-fast:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Build rle-fast
+        run: |
+          cd rle-fast
+          pip install maturin
+          maturin build --release
+          pip install target/wheels/*.whl
+      
+      - name: Test import
+        run: python -c "from rle_fast import decompress_rle; print('✓ rle_fast works')"
+
+  # Test the main package
+  test-simple-rdp:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Build rle-fast
+        run: |
+          cd rle-fast
+          pip install maturin
+          maturin develop --release
+      
+      - name: Install poetry
+        run: pip install poetry
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Run unit tests
+        run: poetry run pytest tests/ --ignore=tests/e2e -v
+      
+      - name: Lint with ruff
+        run: poetry run ruff check src/
+
+  # Type checking
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Build rle-fast
+        run: |
+          cd rle-fast
+          pip install maturin
+          maturin develop --release
+      
+      - name: Install poetry
+        run: pip install poetry
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Run mypy
+        run: poetry run mypy src/simple_rdp --ignore-missing-imports

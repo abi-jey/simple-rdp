@@ -10,6 +10,6 @@ repos:
   rev: v1.19.1
   hooks:
   - id: mypy
-    additional_dependencies: [rich]
+    additional_dependencies: [rich, pyspnego, cryptography]
     args: [--config-file=pyproject.toml]
     exclude: ^tests/

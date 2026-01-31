@@ -1,10 +1,9 @@
-"""Tests for Input Handler."""
+"""Tests for Input types."""
 
-import pytest
-
-from simple_rdp.input import InputHandler
+from simple_rdp.input import KeyEvent
 from simple_rdp.input import KeyModifier
 from simple_rdp.input import MouseButton
+from simple_rdp.input import MouseEvent
 
 
 class TestMouseButton:
@@ -28,36 +27,35 @@ class TestKeyModifier:
         assert KeyModifier.WIN
 
 
-class TestInputHandler:
-    """Tests for InputHandler class."""
+class TestMouseEvent:
+    """Tests for MouseEvent dataclass."""
 
-    def test_initial_state(self):
-        """Test initial state of InputHandler."""
-        handler = InputHandler()
-        assert handler.is_enabled is False
+    def test_mouse_event_creation(self):
+        """Test MouseEvent creation."""
+        event = MouseEvent(x=100, y=200)
+        assert event.x == 100
+        assert event.y == 200
+        assert event.button is None
+        assert event.pressed is False
 
-    def test_enable_disable(self):
-        """Test enable and disable functionality."""
-        handler = InputHandler()
-        handler.enable()
-        assert handler.is_enabled is True
-        handler.disable()
-        assert handler.is_enabled is False
+    def test_mouse_event_with_button(self):
+        """Test MouseEvent with button."""
+        event = MouseEvent(x=100, y=200, button=MouseButton.LEFT, pressed=True)
+        assert event.button == MouseButton.LEFT
+        assert event.pressed is True
 
-    def test_move_mouse_not_implemented(self):
-        """Test that move_mouse raises NotImplementedError."""
-        handler = InputHandler()
-        with pytest.raises(NotImplementedError):
-            handler.move_mouse(100, 200)
 
-    def test_click_not_implemented(self):
-        """Test that click raises NotImplementedError."""
-        handler = InputHandler()
-        with pytest.raises(NotImplementedError):
-            handler.click(100, 200)
+class TestKeyEvent:
+    """Tests for KeyEvent dataclass."""
 
-    def test_type_text_not_implemented(self):
-        """Test that type_text raises NotImplementedError."""
-        handler = InputHandler()
-        with pytest.raises(NotImplementedError):
-            handler.type_text("hello")
+    def test_key_event_creation(self):
+        """Test KeyEvent creation."""
+        event = KeyEvent(key_code=0x1C)
+        assert event.key_code == 0x1C
+        assert event.pressed is True
+        assert event.modifiers == ()
+
+    def test_key_event_with_modifiers(self):
+        """Test KeyEvent with modifiers."""
+        event = KeyEvent(key_code=0x1C, modifiers=(KeyModifier.CTRL, KeyModifier.SHIFT))
+        assert event.modifiers == (KeyModifier.CTRL, KeyModifier.SHIFT)

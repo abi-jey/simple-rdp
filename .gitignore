@@ -3,6 +3,21 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Environment variables (contains secrets)
+.env
+!.env.example
+
+# Session recordings and temp files
+sessions/
+*.png
+*.jpg
+*.mp4
+*.ts
+*.prof
+
+# Rust build artifacts
+rle-fast/target/
+
 # C extensions
 *.so
 
