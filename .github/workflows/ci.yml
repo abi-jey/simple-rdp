@@ -10,7 +10,12 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish to PyPI'
+        description: 'Publish stable release to PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_dev:
+        description: 'Publish dev release to PyPI'
         required: false
         default: false
         type: boolean
@@ -527,9 +532,9 @@ jobs:
     name: Publish & Release (Dev)
     runs-on: ubuntu-latest
     needs: [build-linux, build-macos, build-windows, sdist]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_dev
     environment:
-      name: pypi-dev  # No approval required, auto-publishes on main push
+      name: pypi-dev
       url: https://pypi.org/project/simple-rdp/
     permissions:
       id-token: write
