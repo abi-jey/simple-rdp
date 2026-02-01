@@ -157,7 +157,7 @@ class TestDisplayAsync:
     async def test_get_latest_frame_after_add(self) -> None:
         """Test get_latest_frame after adding frames."""
         display = Display(width=10, height=10)
-        frame_data = b"\xFF" * 300
+        frame_data = b"\xff" * 300
         await display.add_raw_frame(frame_data)
         latest = display.get_latest_frame()
         assert latest is not None
@@ -205,7 +205,7 @@ class TestDisplayAsync:
     async def test_add_frame_from_image(self) -> None:
         """Test adding frame from PIL Image."""
         from PIL import Image
-        
+
         display = Display(width=10, height=10)
         img = Image.new("RGB", (10, 10), color="red")
         await display.add_frame(img)
@@ -216,7 +216,7 @@ class TestDisplayAsync:
     async def test_add_frame_converts_rgba_to_rgb(self) -> None:
         """Test adding RGBA image converts to RGB."""
         from PIL import Image
-        
+
         display = Display(width=10, height=10)
         img = Image.new("RGBA", (10, 10), color=(255, 0, 0, 128))
         await display.add_frame(img)
@@ -231,11 +231,11 @@ class TestDisplayAsync:
         """Test saving video with no chunks."""
         import os
         import tempfile
-        
+
         display = Display(width=10, height=10)
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             path = f.name
-        
+
         try:
             result = await display.save_video(path)
             assert result is True
@@ -279,11 +279,11 @@ class TestDisplayMaxFrames:
         """Test that old frames are evicted when max is reached."""
         display = Display(width=10, height=10, max_raw_frames=5)
         frame_data = b"\x00" * 300
-        
+
         # Add more frames than max
         for _ in range(10):
             await display.add_raw_frame(frame_data)
-        
+
         # Should only have max_raw_frames
         assert display.raw_frame_count == 5
         # But total count should be all received
@@ -412,9 +412,9 @@ class TestDisplayVideoChunkManagement:
         chunk = VideoChunk(data=b"\x00" * 1000, timestamp=1.0, sequence=0)
         display._video_chunks.append(chunk)
         display._video_buffer_size = 1000
-        
+
         display.clear_video_chunks()
-        
+
         assert display._video_buffer_size == 0
         assert len(display._video_chunks) == 0
 
@@ -432,7 +432,7 @@ class TestDisplayVideoChunkManagement:
         chunk2 = VideoChunk(data=b"\x01" * 100, timestamp=2.0, sequence=1)
         display._video_chunks.append(chunk1)
         display._video_chunks.append(chunk2)
-        
+
         chunks = display.get_video_chunks()
         assert len(chunks) == 2
         assert chunks[0].sequence == 0

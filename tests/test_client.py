@@ -125,7 +125,7 @@ class TestClientMultipleInstances:
         """Test multiple clients are independent."""
         client1 = RDPClient(host="host1", port=3389)
         client2 = RDPClient(host="host2", port=3390)
-        
+
         assert client1.host != client2.host
         assert client1.port != client2.port
 
@@ -222,7 +222,7 @@ class TestClientScreenCapture:
         client = RDPClient(host="localhost", width=100, height=100)
         # Manually set screen buffer
         client._screen_buffer = Image.new("RGB", (100, 100), color=(255, 0, 0))
-        
+
         img = await client.screenshot()
         assert img.size == (100, 100)
         # Should be red

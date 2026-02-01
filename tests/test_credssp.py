@@ -269,7 +269,7 @@ class TestCredSSPAuth:
     def test_credssp_auth_initialization(self) -> None:
         """Test CredSSPAuth can be initialized."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(
             hostname="testserver",
             username="testuser",
@@ -283,7 +283,7 @@ class TestCredSSPAuth:
     def test_credssp_auth_client_nonce(self) -> None:
         """Test CredSSPAuth generates random client nonce."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth1 = CredSSPAuth(hostname="test", username="u", password="p")
         auth2 = CredSSPAuth(hostname="test", username="u", password="p")
         # Nonces should be different (random)
@@ -292,7 +292,7 @@ class TestCredSSPAuth:
     def test_credssp_auth_server_version_setter(self) -> None:
         """Test CredSSPAuth server version setter."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         auth.server_version = 3
         assert auth.server_version == 3
@@ -300,14 +300,14 @@ class TestCredSSPAuth:
     def test_credssp_auth_pending_token_initial(self) -> None:
         """Test CredSSPAuth pending token is None initially."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         assert auth.pending_token is None
 
     def test_credssp_auth_get_initial_token(self) -> None:
         """Test CredSSPAuth can get initial token."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(
             hostname="testserver",
             username="testuser",
@@ -369,11 +369,11 @@ class TestAsn1EncodingEdgeCases:
         """Test encoding context with higher tag numbers."""
         from simple_rdp.credssp import ASN1_CONTEXT_1
         from simple_rdp.credssp import ASN1_CONTEXT_2
-        
+
         content = b"\x00\x01\x02"
         result1 = _encode_asn1_context(ASN1_CONTEXT_1, content)
         assert result1[0] == ASN1_CONTEXT_1
-        
+
         result2 = _encode_asn1_context(ASN1_CONTEXT_2, content)
         assert result2[0] == ASN1_CONTEXT_2
 
@@ -424,7 +424,7 @@ class TestCredSSPAuthAdvanced:
     def test_credssp_auth_complete_attribute(self) -> None:
         """Test CredSSPAuth complete attribute."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         # Initially, complete is False (depends on underlying SPNEGO context)
         # This just accesses the property
@@ -433,14 +433,14 @@ class TestCredSSPAuthAdvanced:
     def test_credssp_auth_hostname_stored(self) -> None:
         """Test CredSSPAuth stores hostname."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="myserver.local", username="u", password="p")
         assert auth._hostname == "myserver.local"
 
     def test_credssp_auth_domain_stored(self) -> None:
         """Test CredSSPAuth stores domain."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p", domain="MYDOMAIN")
         assert auth._domain == "MYDOMAIN"
 
@@ -473,14 +473,14 @@ class TestCredSSPAuthComputeHash:
 
         from simple_rdp.credssp import CLIENT_SERVER_HASH_MAGIC
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         public_key = b"test_public_key_data"
-        
+
         # Compute expected hash
         expected = sha256(CLIENT_SERVER_HASH_MAGIC + auth.client_nonce + public_key).digest()
         result = auth.compute_client_server_hash(public_key)
-        
+
         assert result == expected
 
     def test_compute_server_client_hash(self) -> None:
@@ -489,14 +489,14 @@ class TestCredSSPAuthComputeHash:
 
         from simple_rdp.credssp import SERVER_CLIENT_HASH_MAGIC
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         public_key = b"test_public_key_data"
-        
+
         # Compute expected hash
         expected = sha256(SERVER_CLIENT_HASH_MAGIC + auth.client_nonce + public_key).digest()
         result = auth.compute_server_client_hash(public_key)
-        
+
         assert result == expected
 
 
@@ -506,7 +506,7 @@ class TestCredSSPAuthSetters:
     def test_set_server_public_key(self) -> None:
         """Test setting server public key."""
         from simple_rdp.credssp import CredSSPAuth
-        
+
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         public_key = b"server_public_key"
         auth.set_server_public_key(public_key)
@@ -518,22 +518,14 @@ class TestTsCredentialsBuild:
 
     def test_build_ts_credentials_unicode(self) -> None:
         """Test building TS credentials with unicode strings."""
-        result = build_ts_credentials(
-            domain="MYDOMAIN",
-            username="myuser",
-            password="mypassword123!"
-        )
+        result = build_ts_credentials(domain="MYDOMAIN", username="myuser", password="mypassword123!")
         assert isinstance(result, bytes)
         # Should contain the encoded strings
         assert len(result) > 0
 
     def test_build_ts_credentials_empty_domain(self) -> None:
         """Test building TS credentials with empty domain."""
-        result = build_ts_credentials(
-            domain="",
-            username="user",
-            password="pass"
-        )
+        result = build_ts_credentials(domain="", username="user", password="pass")
         assert isinstance(result, bytes)
 
 

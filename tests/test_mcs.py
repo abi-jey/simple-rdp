@@ -229,7 +229,7 @@ class TestConstants:
         from simple_rdp.mcs import MCS_TYPE_ATTACH_USER_CONFIRM
         from simple_rdp.mcs import MCS_TYPE_CHANNEL_JOIN_CONFIRM
         from simple_rdp.mcs import MCS_TYPE_CONNECT_RESPONSE
-        
+
         assert MCS_TYPE_CONNECT_RESPONSE == 0x66
         assert MCS_TYPE_ATTACH_USER_CONFIRM == 0x2E
         assert MCS_TYPE_CHANNEL_JOIN_CONFIRM == 0x3E
@@ -239,7 +239,7 @@ class TestConstants:
         from simple_rdp.mcs import SC_CORE
         from simple_rdp.mcs import SC_NET
         from simple_rdp.mcs import SC_SECURITY
-        
+
         assert SC_CORE == 0x0C01
         assert SC_SECURITY == 0x0C02
         assert SC_NET == 0x0C03
@@ -402,11 +402,7 @@ class TestMcsConnectInitial:
     def test_build_mcs_connect_initial_defaults(self) -> None:
         """Test building MCS connect initial with defaults."""
         # Build user data (client core + security + network)
-        user_data = (
-            build_client_core_data()
-            + build_client_security_data()
-            + build_client_network_data()
-        )
+        user_data = build_client_core_data() + build_client_security_data() + build_client_network_data()
         result = build_mcs_connect_initial(user_data)
         assert isinstance(result, bytes)
         assert len(result) > 100
@@ -461,19 +457,24 @@ class TestMcsParsingFunctions:
     def test_parse_mcs_attach_user_confirm_too_short(self) -> None:
         """Test parsing attach user confirm with too short data."""
         with pytest.raises(ValueError, match="too short"):
-            parse_mcs_attach_user_confirm(b"\x2E")
+            parse_mcs_attach_user_confirm(b"\x2e")
 
     def test_parse_mcs_channel_join_confirm_valid(self) -> None:
         """Test parsing valid channel join confirm."""
         # Type: 0x3E (CHANNEL_JOIN_CONFIRM), result: 0, initiator: 1001, channel: 1003
         # Byte 0: (15 << 2) | 0x02 = 0x3E (type + channel present)
-        data = bytes([
-            0x3E,  # Type + channel present
-            0x00,  # Result (success)
-            0x00, 0x00,  # Initiator offset (0 => 1001)
-            0x03, 0xEB,  # Requested channel (1003)
-            0x03, 0xEB,  # Joined channel (1003)
-        ])
+        data = bytes(
+            [
+                0x3E,  # Type + channel present
+                0x00,  # Result (success)
+                0x00,
+                0x00,  # Initiator offset (0 => 1001)
+                0x03,
+                0xEB,  # Requested channel (1003)
+                0x03,
+                0xEB,  # Joined channel (1003)
+            ]
+        )
         result = parse_mcs_channel_join_confirm(data)
         assert isinstance(result, dict)
         assert result["result"] == 0
