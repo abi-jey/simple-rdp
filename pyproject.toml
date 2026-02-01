@@ -14,7 +14,7 @@ pyasn1 = "^0.6.2"
 pillow = "^12.1.0"
 asn1crypto = "^1.5.1"
 python-dotenv = "^1.0.0"
-rle-fast = "^0.1.0"  # Rust RLE decompression (required)
+# rle-fast is installed separately via maturin (Rust extension)
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
