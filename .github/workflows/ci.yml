@@ -9,18 +9,13 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Publish stable release to PyPI'
-        required: false
-        default: false
-        type: boolean
       publish_dev:
         description: 'Publish dev release to PyPI'
         required: false
         default: false
         type: boolean
       version_bump:
-        description: 'Version bump type (requires publish)'
+        description: 'Version bump type (automatically publishes stable release)'
         required: false
         default: 'none'
         type: choice
@@ -436,7 +431,7 @@ jobs:
       needs.build-macos.result == 'success' &&
       needs.build-windows.result == 'success' &&
       needs.sdist.result == 'success' &&
-      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish))
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'))
     environment:
       name: pypi-stable  # Requires approval in GitHub repo settings
       url: https://pypi.org/project/simple-rdp/
