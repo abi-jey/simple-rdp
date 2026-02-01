@@ -57,9 +57,9 @@ jobs:
       
       - name: Build and install rle-fast into poetry venv
         run: |
-          cd rle-fast
           poetry run pip install maturin
-          poetry run maturin develop --release
+          poetry run maturin build --release -m rle-fast/Cargo.toml
+          poetry run pip install --find-links rle-fast/target/wheels rle_fast
       
       - name: Verify rle_fast installation
         run: poetry run python -c "from rle_fast import decompress_rle; print('rle_fast works in poetry venv')"
