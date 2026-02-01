@@ -1,6 +1,6 @@
 [project]
 name = "simple-rdp"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 readme = "README.md"
 requires-python = ">=3.11, <4.0"
@@ -50,16 +50,16 @@ mypy_path = "src"
 exclude = [ "tests/", "agents/", "examples/", "simple_rdp_mcp/",]
 ignore_missing_imports = true
 
-[tool.pytest.ini_options]
-testpaths = [ "tests",]
-pythonpath = [ "src",]
-asyncio_mode = "auto"
-
 [tool.ruff.lint]
 select = [ "E", "F", "I", "UP", "B", "SIM",]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = [ "tests",]
+pythonpath = [ "src",]
+asyncio_mode = "auto"
 
 [tool.ruff.lint.isort]
 force-single-line = true
