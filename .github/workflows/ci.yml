@@ -419,10 +419,10 @@ jobs:
           path: dist
 
   # =============================================================================
-  # PUBLISH (Stable Release)
+  # PUBLISH & RELEASE (Stable)
   # =============================================================================
-  publish:
-    name: Publish to PyPI
+  publish-stable:
+    name: Publish & Release (Stable)
     runs-on: ubuntu-latest
     needs: [bump-version, build-linux, build-macos, build-windows, sdist]
     if: |
@@ -521,10 +521,10 @@ jobs:
           files: dist/*
 
   # =============================================================================
-  # DEV RELEASE (on main branch push)
+  # PUBLISH & RELEASE (Dev)
   # =============================================================================
   publish-dev:
-    name: Publish Dev
+    name: Publish & Release (Dev)
     runs-on: ubuntu-latest
     needs: [build-linux, build-macos, build-windows, sdist]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
