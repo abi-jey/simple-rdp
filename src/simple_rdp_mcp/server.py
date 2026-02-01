@@ -11,19 +11,25 @@ The server connects to an RDP server on startup and provides tools for:
 - Session recording (optional)
 
 Usage:
-    # With environment variables
+    # With CLI arguments (recommended)
+    simple-rdp-mcp --host 192.168.1.100 --user username --password password
+
+    # With environment variables (fallback)
     export RDP_HOST=192.168.1.100
     export RDP_USER=username
     export RDP_PASS=password
     simple-rdp-mcp
 
+    # With FastMCP CLI (pass args after --)
+    fastmcp run simple_rdp_mcp.server:mcp -- --host 192.168.1.100 --user admin
+
     # With session recording
-    export RDP_RECORD_SESSION=/path/to/recording.mp4
-    simple-rdp-mcp
+    simple-rdp-mcp --host 192.168.1.100 --user admin --record /path/to/recording.mp4
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import io
@@ -47,6 +53,88 @@ load_dotenv()
 
 
 # =============================================================================
+# CLI Argument Parser
+# =============================================================================
+
+# Global to store CLI args parsed at startup
+_cli_args: argparse.Namespace | None = None
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for RDP connection."""
+    parser = argparse.ArgumentParser(
+        description="Simple RDP MCP Server - Expose RDP client as MCP tools",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Connect with CLI arguments
+  simple-rdp-mcp --host 192.168.1.100 --user admin --password secret
+
+  # Using environment variables (fallback)
+  export RDP_HOST=192.168.1.100
+  export RDP_USER=admin
+  export RDP_PASS=secret
+  simple-rdp-mcp
+
+  # Using fastmcp CLI with arguments
+  fastmcp run simple_rdp_mcp.server:mcp -- --host 192.168.1.100 --user admin
+""",
+    )
+
+    parser.add_argument(
+        "--host",
+        help="RDP server hostname or IP (env: RDP_HOST)",
+        default=os.getenv("RDP_HOST"),
+    )
+    parser.add_argument(
+        "--user",
+        "--username",
+        dest="username",
+        help="Username for authentication (env: RDP_USER)",
+        default=os.getenv("RDP_USER"),
+    )
+    parser.add_argument(
+        "--password",
+        "--pass",
+        dest="password",
+        help="Password for authentication (env: RDP_PASS)",
+        default=os.getenv("RDP_PASS"),
+    )
+    parser.add_argument(
+        "--domain",
+        help="Windows domain (env: RDP_DOMAIN)",
+        default=os.getenv("RDP_DOMAIN"),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="RDP port (default: 3389, env: RDP_PORT)",
+        default=int(os.getenv("RDP_PORT", "3389")),
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        help="Desktop width in pixels (default: 1920, env: RDP_WIDTH)",
+        default=int(os.getenv("RDP_WIDTH", "1920")),
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        help="Desktop height in pixels (default: 1080, env: RDP_HEIGHT)",
+        default=int(os.getenv("RDP_HEIGHT", "1080")),
+    )
+    parser.add_argument(
+        "--record",
+        "--record-session",
+        dest="record_session",
+        help="Path to save session recording (env: RDP_RECORD_SESSION)",
+        default=os.getenv("RDP_RECORD_SESSION"),
+    )
+
+    return parser.parse_args()
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -65,23 +153,24 @@ class RDPConfig:
     record_session: str | None = None  # Path to save session recording
 
     @classmethod
-    def from_env(cls) -> RDPConfig:
-        """Create config from environment variables."""
-        host = os.getenv("RDP_HOST")
+    def from_args(cls, args: argparse.Namespace | None = None) -> RDPConfig:
+        """Create config from CLI arguments (with env var fallbacks)."""
+        args = args or _cli_args
+
+        # Use CLI args if available, otherwise fall back to env vars
+        host = args.host if args else os.getenv("RDP_HOST")
         if not host:
-            raise ValueError(
-                "RDP_HOST environment variable is required. Set RDP_HOST, RDP_USER, RDP_PASS to connect on startup."
-            )
+            raise ValueError("RDP host is required. Use --host argument or set RDP_HOST environment variable.")
 
         return cls(
             host=host,
-            username=os.getenv("RDP_USER"),
-            password=os.getenv("RDP_PASS"),
-            domain=os.getenv("RDP_DOMAIN"),
-            port=int(os.getenv("RDP_PORT", "3389")),
-            width=int(os.getenv("RDP_WIDTH", "1920")),
-            height=int(os.getenv("RDP_HEIGHT", "1080")),
-            record_session=os.getenv("RDP_RECORD_SESSION"),
+            username=args.username if args else os.getenv("RDP_USER"),
+            password=args.password if args else os.getenv("RDP_PASS"),
+            domain=args.domain if args else os.getenv("RDP_DOMAIN"),
+            port=args.port if args else int(os.getenv("RDP_PORT", "3389")),
+            width=args.width if args else int(os.getenv("RDP_WIDTH", "1920")),
+            height=args.height if args else int(os.getenv("RDP_HEIGHT", "1080")),
+            record_session=args.record_session if args else os.getenv("RDP_RECORD_SESSION"),
         )
 
 
@@ -652,8 +741,8 @@ async def lifespan(app: FastMCP) -> AsyncGenerator[None, None]:
     """Connect to RDP on startup and disconnect on shutdown."""
     global _session
 
-    # Load config from environment
-    config = RDPConfig.from_env()
+    # Load config from CLI arguments (with env var fallbacks)
+    config = RDPConfig.from_args()
 
     # Create and connect
     client = RDPClient(
@@ -832,6 +921,8 @@ async def rdp_stop_recording(
 
 def run_server() -> None:
     """Run the MCP server (entry point for CLI)."""
+    global _cli_args
+    _cli_args = parse_args()
     mcp.run()
 
 

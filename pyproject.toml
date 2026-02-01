@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.11, <4.0"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = [
-    "fastmcp>=3.0.0",
+    "fastmcp>=2.0.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -102,7 +102,7 @@ mkdocs-material = "^9.7.1"
 mkdocstrings = {extras = ["python"], version = "^1.0.2"}
 
 [tool.poetry.group.mcp.dependencies]
-fastmcp = "^3.0.0"
+fastmcp = "^2.0.0"
 
 [project.scripts]
 simple-rdp-mcp = "simple_rdp_mcp.server:run_server"
