@@ -48,12 +48,60 @@ jobs:
         run: pre-commit run --all-files
 
   # =============================================================================
-  # LINUX - Test & Build
+  # LINUX TESTS
   # =============================================================================
-  linux:
-    name: Linux (${{ matrix.target }}, py${{ matrix.python-version }})
+  test-linux:
+    name: Test Linux (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: [lint]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Build and install
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release
+      
+      - name: Install wheel
+        run: pip install target/wheels/*.whl
+      
+      - name: Verify Rust extension
+        run: python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+      
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+      
+      - name: Run tests
+        run: |
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v --cov=simple_rdp --cov-report=xml --cov-report=term-missing
+          cp coverage.xml $GITHUB_WORKSPACE/coverage.xml
+      
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  # =============================================================================
+  # LINUX BUILDS
+  # =============================================================================
+  build-linux:
+    name: Build Linux (${{ matrix.target }}, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [test-linux]
     strategy:
       fail-fast: false
       matrix:
@@ -63,8 +111,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
+          python-version: '3.12'
       
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -74,36 +121,85 @@ jobs:
           sccache: true
           manylinux: auto
       
-      # Only run tests on x86_64 (native architecture)
-      - name: Install wheel and test
-        if: matrix.target == 'x86_64'
-        run: |
-          pip install dist/*.whl
-          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
-          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
-          cp -r tests /tmp/tests
-          cd /tmp
-          pytest tests/ --ignore=tests/e2e -v --cov=simple_rdp --cov-report=xml --cov-report=term-missing
-          cp coverage.xml $GITHUB_WORKSPACE/coverage.xml
-      
-      - name: Upload coverage
-        if: matrix.python-version == '3.12' && matrix.target == 'x86_64'
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
   # =============================================================================
-  # WINDOWS - Test & Build
+  # MACOS TESTS
   # =============================================================================
-  windows:
-    name: Windows (py${{ matrix.python-version }})
+  test-macos:
+    name: Test macOS (py${{ matrix.python-version }})
+    runs-on: macos-latest
+    needs: [lint]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Build and install
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release
+      
+      - name: Install wheel
+        run: pip install target/wheels/*.whl
+      
+      - name: Verify Rust extension
+        run: python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+      
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+      
+      - name: Run tests
+        run: |
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v
+
+  # =============================================================================
+  # MACOS BUILDS
+  # =============================================================================
+  build-macos:
+    name: Build macOS (${{ matrix.target }}, py${{ matrix.python-version }})
+    runs-on: macos-latest
+    needs: [test-macos]
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64, aarch64]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
+          path: dist
+
+  # =============================================================================
+  # WINDOWS TESTS
+  # =============================================================================
+  test-windows:
+    name: Test Windows (py${{ matrix.python-version }})
     runs-on: windows-latest
     needs: [lint]
     strategy:
@@ -117,6 +213,46 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: dtolnay/rust-toolchain@stable
       
+      - name: Build and install
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release
+      
+      - name: Install wheel
+        shell: bash
+        run: pip install target/wheels/*.whl
+      
+      - name: Verify Rust extension
+        run: python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+      
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+      
+      - name: Run tests
+        shell: bash
+        run: |
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v
+
+  # =============================================================================
+  # WINDOWS BUILDS
+  # =============================================================================
+  build-windows:
+    name: Build Windows (py${{ matrix.python-version }})
+    runs-on: windows-latest
+    needs: [test-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -124,61 +260,9 @@ jobs:
           args: --release --out dist -i ${{ matrix.python-version }}
           sccache: true
       
-      - name: Install wheel and test
-        shell: bash
-        run: |
-          pip install dist/*.whl
-          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
-          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
-          cp -r tests /tmp/tests
-          cd /tmp
-          pytest tests/ --ignore=tests/e2e -v
-      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-windows-x64-py${{ matrix.python-version }}
-          path: dist
-
-  # =============================================================================
-  # MACOS - Test & Build
-  # =============================================================================
-  macos:
-    name: macOS (${{ matrix.target }}, py${{ matrix.python-version }})
-    runs-on: macos-latest
-    needs: [lint]
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64, aarch64]
-        python-version: ['3.11', '3.12', '3.13', '3.14']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist -i ${{ matrix.python-version }}
-          sccache: true
-      
-      # Only run tests on native architecture (aarch64 on macos-latest)
-      - name: Install wheel and test
-        if: matrix.target == 'aarch64'
-        run: |
-          pip install dist/*.whl
-          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
-          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
-          cp -r tests /tmp/tests
-          cd /tmp
-          pytest tests/ --ignore=tests/e2e -v
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
   # =============================================================================
@@ -207,7 +291,7 @@ jobs:
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [linux, windows, macos, sdist]
+    needs: [build-linux, build-macos, build-windows, sdist]
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -303,7 +387,6 @@ jobs:
           git pull --rebase origin main
           git push
       
-      # When version is bumped, we need to rebuild wheels with new version
       - name: Setup Rust
         if: steps.bump.outputs.bumped == 'true'
         uses: dtolnay/rust-toolchain@stable
@@ -334,7 +417,6 @@ jobs:
       - name: Get previous stable tag
         id: prev_tag
         run: |
-          # Get stable tags (exclude dev/alpha/beta)
           PREV_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1)
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
@@ -372,7 +454,7 @@ jobs:
   publish-dev:
     name: Publish Dev
     runs-on: ubuntu-latest
-    needs: [linux, windows, macos, sdist]
+    needs: [build-linux, build-macos, build-windows, sdist]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: pypi
