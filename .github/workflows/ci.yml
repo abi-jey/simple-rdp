@@ -3,51 +3,96 @@ name: CI
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
+      - 'rle-fast-v*'
   pull_request:
     branches: [main]
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      publish_rle_fast:
+        description: 'Publish rle-fast to PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_simple_rdp:
+        description: 'Publish simple-rdp to PyPI'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  # Test the Rust extension
-  test-rle-fast:
+  # =============================================================================
+  # LINT - Check code quality for both Python and Rust
+  # =============================================================================
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install poetry
+        run: pip install poetry
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      
+      - name: Lint with ruff
+        run: poetry run ruff check src/ tests/
+      
+      - name: Format check with ruff
+        run: poetry run ruff format --check src/ tests/ || true
+
+  lint-rust:
+    name: Lint Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      
+      - name: Check formatting
+        run: cargo fmt --manifest-path rle-fast/Cargo.toml -- --check
+      
+      - name: Run clippy
+        run: cargo clippy --manifest-path rle-fast/Cargo.toml -- -D warnings
+
+  # =============================================================================
+  # TEST - Run tests for both Python and Rust
+  # =============================================================================
+  test-rust:
+    name: Test Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
       
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Build and install rle-fast
-        run: |
-          cd rle-fast
-          pip install maturin
-          maturin build --release
-          pip install --find-links target/wheels rle_fast
-      
-      - name: Test import
-        run: python -c "from rle_fast import decompress_rle; print('rle_fast works')"
+      - name: Run Rust tests
+        run: cargo test --manifest-path rle-fast/Cargo.toml --release
 
-  # Test the main package
-  test-simple-rdp:
+  test-python:
+    name: Test Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
       
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
       
       - name: Install poetry
         run: pip install poetry
@@ -62,29 +107,27 @@ jobs:
           poetry run pip install --find-links rle-fast/target/wheels rle_fast
       
       - name: Verify rle_fast installation
-        run: poetry run python -c "from rle_fast import decompress_rle; print('rle_fast works in poetry venv')"
+        run: poetry run python -c "from rle_fast import decompress_rle; print('rle_fast works')"
       
-      - name: Run unit tests with coverage
+      - name: Run tests with coverage
         run: poetry run pytest tests/ --ignore=tests/e2e -v --cov=src/simple_rdp --cov-report=term-missing --cov-report=html --cov-report=xml
       
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-${{ matrix.python-version }}
+          name: coverage-report-py${{ matrix.python-version }}
           path: htmlcov/
           retention-days: 30
       
       - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           file: coverage.xml
           fail_ci_if_error: false
-      
-      - name: Lint with ruff
-        run: poetry run ruff check src/
 
-  # Type checking
   typecheck:
+    name: Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,14 +135,12 @@ jobs:
         with:
           python-version: '3.12'
       
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
       
       - name: Build and install rle-fast
         run: |
-          cd rle-fast
           pip install maturin
-          maturin build --release
+          cd rle-fast && maturin build --release
           pip install --find-links target/wheels rle_fast
       
       - name: Install poetry
@@ -111,19 +152,212 @@ jobs:
       - name: Run mypy
         run: poetry run mypy src/simple_rdp --ignore-missing-imports
 
-  # Publish alpha release to PyPI after all tests pass
-  publish-alpha:
+  # =============================================================================
+  # BUILD - Build rle-fast wheels for all platforms
+  # =============================================================================
+  build-rle-fast-linux:
+    name: Build rle-fast (Linux ${{ matrix.target }} py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: [test-rle-fast, test-simple-rdp, typecheck]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment: pypi
+    needs: [lint-rust, test-rust]
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+          manylinux: auto
+          working-directory: rle-fast
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
+          path: rle-fast/dist
+
+  build-rle-fast-windows:
+    name: Build rle-fast (Windows py${{ matrix.python-version }})
+    runs-on: windows-latest
+    needs: [lint-rust, test-rust]
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+          working-directory: rle-fast
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64-py${{ matrix.python-version }}
+          path: rle-fast/dist
+
+  build-rle-fast-macos:
+    name: Build rle-fast (macOS ${{ matrix.target }} py${{ matrix.python-version }})
+    runs-on: macos-latest
+    needs: [lint-rust, test-rust]
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+          working-directory: rle-fast
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
+          path: rle-fast/dist
+
+  build-rle-fast-sdist:
+    name: Build rle-fast sdist
+    runs-on: ubuntu-latest
+    needs: [lint-rust, test-rust]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: rle-fast
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: rle-fast/dist
+
+  # =============================================================================
+  # BUILD - Build simple-rdp package
+  # =============================================================================
+  build-simple-rdp:
+    name: Build simple-rdp
+    runs-on: ubuntu-latest
+    needs: [lint-python, test-python, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install poetry
+        run: pip install poetry
+      
+      - name: Build package
+        run: poetry build
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simple-rdp-dist
+          path: dist/
+
+  # =============================================================================
+  # PUBLISH - Publish rle-fast to PyPI
+  # =============================================================================
+  publish-rle-fast:
+    name: Publish rle-fast to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-rle-fast-linux, build-rle-fast-windows, build-rle-fast-macos, build-rle-fast-sdist]
+    if: |
+      startsWith(github.ref, 'refs/tags/rle-fast-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_rle_fast)
+    environment:
+      name: pypi
+      url: https://pypi.org/project/rle-fast/
     permissions:
-      id-token: write  # For trusted publishing
-      contents: write  # For creating releases
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      
+      - name: List artifacts
+        run: ls -la dist/
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  # =============================================================================
+  # PUBLISH - Publish simple-rdp to PyPI
+  # =============================================================================
+  publish-simple-rdp:
+    name: Publish simple-rdp to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-simple-rdp]
+    if: |
+      (startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/rle-fast-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_simple_rdp)
+    environment:
+      name: pypi
+      url: https://pypi.org/project/simple-rdp/
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: simple-rdp-dist
+          path: dist
+      
+      - name: List distribution
+        run: ls -la dist/
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  # =============================================================================
+  # ALPHA RELEASE - Publish alpha on main branch push
+  # =============================================================================
+  publish-alpha:
+    name: Publish Alpha Release
+    runs-on: ubuntu-latest
+    needs: [build-simple-rdp, publish-rle-fast]
+    # Only run on main branch push (not tags, not PRs, not workflow_dispatch)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/simple-rdp/
+    permissions:
+      id-token: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for version calculation
+          fetch-depth: 0
       
       - uses: actions/setup-python@v5
         with:
@@ -135,15 +369,11 @@ jobs:
       - name: Generate alpha version
         id: version
         run: |
-          # Get base version from pyproject.toml
           BASE_VERSION=$(poetry version -s)
-          # Create alpha version with timestamp and short SHA
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          SHORT_SHA=${GITHUB_SHA::7}
           ALPHA_VERSION="${BASE_VERSION}a${TIMESTAMP}"
           echo "version=${ALPHA_VERSION}" >> $GITHUB_OUTPUT
           echo "Alpha version: ${ALPHA_VERSION}"
-          # Update pyproject.toml with alpha version
           poetry version ${ALPHA_VERSION}
       
       - name: Build package
@@ -152,7 +382,6 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Uses trusted publishing - configure at pypi.org/manage/project/simple-rdp/settings/publishing/
           skip-existing: true
       
       - name: Create GitHub Release

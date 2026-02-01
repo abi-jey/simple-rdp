@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Fast RLE bitmap decompression for RDP"
 license = "MIT"
+repository = "https://github.com/abi-jey/simple-rdp"
+homepage = "https://github.com/abi-jey/simple-rdp"
+documentation = "https://github.com/abi-jey/simple-rdp#readme"
+keywords = ["rdp", "rle", "decompression", "bitmap"]
+categories = ["compression", "graphics"]
 
 [lib]
 name = "rle_fast"
