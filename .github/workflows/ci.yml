@@ -59,8 +59,10 @@ jobs:
         run: |
           cd rle-fast
           poetry run pip install maturin
-          poetry run maturin build --release
-          poetry run pip install --find-links target/wheels rle_fast
+          poetry run maturin develop --release
+      
+      - name: Verify rle_fast installation
+        run: poetry run python -c "from rle_fast import decompress_rle; print('rle_fast works in poetry venv')"
       
       - name: Run unit tests with coverage
         run: poetry run pytest tests/ --ignore=tests/e2e -v --cov=src/simple_rdp --cov-report=term-missing --cov-report=html --cov-report=xml
