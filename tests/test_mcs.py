@@ -91,6 +91,22 @@ class TestBerEncoding:
         with pytest.raises(ValueError, match="Negative integers"):
             _ber_write_integer(-1)
 
+    def test_ber_write_integer_high_bit_set(self) -> None:
+        """Test BER integer encoding - value with high bit set needs padding."""
+        # 0x80 = 128, has high bit set, needs leading 0x00
+        result = _ber_write_integer(128)
+        assert result[0] == 0x02  # INTEGER tag
+        # Should have 2 bytes of content: 0x00 0x80
+        assert result[1] == 2  # Length
+        assert result[2] == 0x00  # Leading zero
+        assert result[3] == 0x80
+
+    def test_ber_write_integer_0xFF(self) -> None:
+        """Test BER integer encoding - 0xFF needs padding."""
+        result = _ber_write_integer(0xFF)
+        assert result[0] == 0x02  # INTEGER tag
+        assert result[2] == 0x00  # Leading zero for high bit
+
     def test_ber_write_octet_string(self) -> None:
         """Test BER octet string encoding."""
         data = b"hello"
@@ -233,6 +249,27 @@ class TestPerIntegerEncoding:
         result = _per_write_integer(256)
         assert isinstance(result, bytes)
         assert len(result) >= 2
+
+    def test_per_write_integer_large_2byte(self) -> None:
+        """Test PER integer encoding - value requiring 2 bytes."""
+        result = _per_write_integer(1000)
+        assert isinstance(result, bytes)
+        # Should be 2-byte format: 0x02, high, low
+        assert result[0] == 0x02
+        assert len(result) == 3
+
+    def test_per_write_integer_max_2byte(self) -> None:
+        """Test PER integer encoding - max 2-byte value."""
+        result = _per_write_integer(65535)
+        assert isinstance(result, bytes)
+        assert result[0] == 0x02
+        assert result[1] == 0xFF
+        assert result[2] == 0xFF
+
+    def test_per_write_integer_too_large(self) -> None:
+        """Test PER integer encoding - too large raises error."""
+        with pytest.raises(ValueError, match="Integer too large"):
+            _per_write_integer(65536)
 
 
 class TestClientCoreData:
