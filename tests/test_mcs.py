@@ -218,6 +218,30 @@ class TestConstants:
         """Test cluster type constant."""
         assert CS_CLUSTER == 0xC004
 
+    def test_mcs_type_constants(self) -> None:
+        """Test MCS type constants."""
+        assert MCS_TYPE_CONNECT_INITIAL == 0x65
+        assert MCS_TYPE_ERECT_DOMAIN_REQUEST == 0x04
+        assert MCS_TYPE_ATTACH_USER_REQUEST == 0x28
+        assert MCS_TYPE_CHANNEL_JOIN_REQUEST == 0x38
+        assert MCS_TYPE_SEND_DATA_REQUEST == 0x64
+
+    def test_mcs_confirm_type_constants(self) -> None:
+        """Test MCS confirm type constants."""
+        from simple_rdp.mcs import MCS_TYPE_CONNECT_RESPONSE, MCS_TYPE_ATTACH_USER_CONFIRM, MCS_TYPE_CHANNEL_JOIN_CONFIRM
+        
+        assert MCS_TYPE_CONNECT_RESPONSE == 0x66
+        assert MCS_TYPE_ATTACH_USER_CONFIRM == 0x2E
+        assert MCS_TYPE_CHANNEL_JOIN_CONFIRM == 0x3E
+
+    def test_server_user_data_types(self) -> None:
+        """Test server user data type constants."""
+        from simple_rdp.mcs import SC_CORE, SC_SECURITY, SC_NET
+        
+        assert SC_CORE == 0x0C01
+        assert SC_SECURITY == 0x0C02
+        assert SC_NET == 0x0C03
+
 
 class TestBerApplicationTag:
     """Tests for BER application tag encoding."""
