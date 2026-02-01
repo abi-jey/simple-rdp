@@ -66,10 +66,10 @@ async def capture_loop():
 asyncio.run(capture_loop())
 ```
 
-1.  :material-speedometer: With Rust acceleration, you can achieve up to 30 FPS
+1.  :material-speedometer: You can achieve up to 30 FPS with continuous capture
 
 !!! tip "Performance"
-    For higher frame rates, use the Rust extension and consider saving frames asynchronously.
+    For higher frame rates, consider saving frames asynchronously.
 
 ## Screenshot with Cursor
 
@@ -117,9 +117,6 @@ arr = np.array(img)
 ```
 
 ## Performance Tips
-
-!!! success "Rust Acceleration Included"
-    The Rust extension is included by default and provides ~100x faster RLE decompression.
 
 ??? tip "Disable Wallpaper"
     ```python

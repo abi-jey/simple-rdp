@@ -13,7 +13,7 @@ Thank you for your interest in contributing to Simple RDP! :heart:
 - [x] Python 3.11+
 - [x] Poetry
 - [x] Git
-- [ ] (Optional) Rust toolchain for RLE acceleration
+- [x] Rust toolchain (install from [rustup.rs](https://rustup.rs/))
 
 ### Clone and Install
 
@@ -29,7 +29,7 @@ poetry install
 poetry run pre-commit install
 ```
 
-### Build Rust Extension (Optional)
+### Build Rust Extension
 
 ```bash
 maturin develop --release

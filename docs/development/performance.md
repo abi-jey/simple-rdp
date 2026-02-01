@@ -6,10 +6,11 @@ Simple RDP is designed for high-performance screen capture and input automation.
 
 ### Screenshot Performance
 
-| Configuration | FPS | CPU Usage | Notes |
-|---------------|-----|-----------|-------|
-| Pure Python | ~15 | ~50% | Default |
-| Rust RLE | ~30 | ~10% | With `maturin develop --release` |
+| Metric | Performance |
+|--------|:-----------:|
+| Screenshot FPS | ~30 FPS |
+| CPU Usage | ~10% |
+| RLE Decompression | Native Rust |
 
 ### Factors Affecting Performance
 
@@ -18,37 +19,13 @@ Simple RDP is designed for high-performance screen capture and input automation.
 3. **Screen Activity** - More changes = more bitmap updates
 4. **Network Latency** - Affects input response time
 
-## Rust Acceleration
+## How It Works
 
-The biggest performance improvement comes from the optional Rust RLE decompressor.
+Simple RDP uses a native Rust extension for RLE (Run-Length Encoding) bitmap decompression:
 
-### Installation
-
-```bash
-# Requires Rust toolchain
-maturin develop --release
-```
-
-### How It Works
-
-RDP uses RLE (Run-Length Encoding) compression for bitmap data. The Rust implementation:
-
-- Processes bytes ~100x faster than Python
+- Processes bytes ~100x faster than pure Python
 - Releases the GIL during decompression
 - Allows parallel processing of bitmap updates
-
-### Automatic Detection
-
-Simple RDP automatically uses Rust when available:
-
-```python
-# In src/simple_rdp/rle.py
-try:
-    from simple_rdp._rle import decompress_rle as _rust_decompress
-    USE_RUST = True
-except ImportError:
-    USE_RUST = False
-```
 
 ## Optimization Tips
 

@@ -56,24 +56,14 @@
 ```python
 import simple_rdp
 print(simple_rdp.__version__)
-
-# Verify Rust extension is loaded
-from simple_rdp._rle import decompress_rle  # (1)!
-print("Rust extension loaded successfully")
 ```
 
-1.  :material-check: If this import succeeds, you have the high-performance Rust backend
-
 ## Performance
-
-!!! success "Rust Acceleration Included"
-    The native Rust extension is included by default and provides significant performance improvements.
 
 | Metric | Performance |
 |--------|:-----------:|
 | Screenshot FPS | ~30 FPS |
 | Event Loop Usage | ~10% |
-| RLE Decompression | 100x faster |
 
 ## Dependencies
 

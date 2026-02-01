@@ -55,11 +55,11 @@ Unlike traditional RDP clients, Simple RDP does not provide an interactive sessi
 
     [:octicons-arrow-right-24: API Reference](api/client.md)
 
--   :material-rocket-launch:{ .lg .middle } **Rust Acceleration**
+-   :material-rocket-launch:{ .lg .middle } **High Performance**
 
     ---
 
-    100x faster RLE decompression with native Rust extension
+    Native Rust extension for fast RLE bitmap decompression
 
     [:octicons-arrow-right-24: Performance](development/performance.md)
 
