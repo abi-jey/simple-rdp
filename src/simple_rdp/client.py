@@ -1110,44 +1110,44 @@ class RDPClient:
             return
 
         offset = 0
-        cache_index = struct.unpack("<H", data[offset:offset + 2])[0]
+        cache_index = struct.unpack("<H", data[offset : offset + 2])[0]
         offset += 2
 
         # Hotspot: xPos (2) + yPos (2)
-        hotspot_x = struct.unpack("<H", data[offset:offset + 2])[0]
+        hotspot_x = struct.unpack("<H", data[offset : offset + 2])[0]
         offset += 2
-        hotspot_y = struct.unpack("<H", data[offset:offset + 2])[0]
-        offset += 2
-
-        width = struct.unpack("<H", data[offset:offset + 2])[0]
-        offset += 2
-        height = struct.unpack("<H", data[offset:offset + 2])[0]
+        hotspot_y = struct.unpack("<H", data[offset : offset + 2])[0]
         offset += 2
 
-        length_and_mask = struct.unpack("<H", data[offset:offset + 2])[0]
+        width = struct.unpack("<H", data[offset : offset + 2])[0]
         offset += 2
-        length_xor_mask = struct.unpack("<H", data[offset:offset + 2])[0]
+        height = struct.unpack("<H", data[offset : offset + 2])[0]
+        offset += 2
+
+        length_and_mask = struct.unpack("<H", data[offset : offset + 2])[0]
+        offset += 2
+        length_xor_mask = struct.unpack("<H", data[offset : offset + 2])[0]
         offset += 2
 
         if len(data) < offset + length_xor_mask + length_and_mask:
             logger.debug(f"Pointer data truncated: need {offset + length_xor_mask + length_and_mask}, have {len(data)}")
             return
 
-        xor_mask_data = data[offset:offset + length_xor_mask]
+        xor_mask_data = data[offset : offset + length_xor_mask]
         offset += length_xor_mask
-        and_mask_data = data[offset:offset + length_and_mask]
+        and_mask_data = data[offset : offset + length_and_mask]
 
         # Create pointer image
         try:
-            pointer_img = self._decode_pointer_image(
-                width, height, bpp, xor_mask_data, and_mask_data
-            )
+            pointer_img = self._decode_pointer_image(width, height, bpp, xor_mask_data, and_mask_data)
             if pointer_img:
                 self._pointer_image = pointer_img
                 self._pointer_hotspot = (hotspot_x, hotspot_y)
                 self._pointer_visible = True
                 self._pointer_cache[cache_index] = (pointer_img, (hotspot_x, hotspot_y))
-                logger.debug(f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}")
+                logger.debug(
+                    f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}"
+                )
         except Exception as e:
             logger.debug(f"Failed to decode pointer: {e}")
 
@@ -1177,10 +1177,7 @@ class RDPClient:
                 if and_data:
                     and_byte_idx = src_row * and_row_size + col // 8
                     and_bit = 7 - (col % 8)
-                    if and_byte_idx < len(and_data):
-                        is_transparent = (and_data[and_byte_idx] >> and_bit) & 1
-                    else:
-                        is_transparent = 1
+                    is_transparent = (and_data[and_byte_idx] >> and_bit) & 1 if and_byte_idx < len(and_data) else 1
                 else:
                     is_transparent = 0
 
@@ -1198,7 +1195,7 @@ class RDPClient:
                         r = xor_data[xor_offset + 2]
                         a = 255
                     elif bpp == 16:
-                        pixel = struct.unpack("<H", xor_data[xor_offset:xor_offset + 2])[0]
+                        pixel = struct.unpack("<H", xor_data[xor_offset : xor_offset + 2])[0]
                         r = ((pixel >> 10) & 0x1F) << 3
                         g = ((pixel >> 5) & 0x1F) << 3
                         b = (pixel & 0x1F) << 3

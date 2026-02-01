@@ -90,7 +90,7 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 mypy_path = "src"
-exclude = ["tests/", "agents/"]
+exclude = ["tests/", "agents/", "examples/"]
 ignore_missing_imports = true
 
 [tool.poetry.group.docs.dependencies]

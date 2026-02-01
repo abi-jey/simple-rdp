@@ -12,7 +12,7 @@ repos:
   - id: mypy
     additional_dependencies: [rich, pyspnego, cryptography]
     args: [--config-file=pyproject.toml]
-    exclude: ^tests/
+    exclude: ^(tests/|examples/)
 
 - repo: local
   hooks:
