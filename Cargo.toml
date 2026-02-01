@@ -1,6 +1,6 @@
 [package]
 name = "simple-rdp"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 license = "MIT"
