@@ -1,88 +1,42 @@
 [project]
 name = "simple-rdp"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 readme = "README.md"
-license = { text = "MIT" }
 requires-python = ">=3.11, <4.0"
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Programming Language :: Rust",
-    "Topic :: System :: Networking",
-    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
-]
-keywords = ["rdp", "remote-desktop", "automation", "screen-capture"]
-dependencies = [
-    "pyspnego>=0.12.0",
-    "pyasn1>=0.6.2",
-    "pillow>=12.1.0",
-    "asn1crypto>=1.5.1",
-    "python-dotenv>=1.0.0",
-]
+classifiers = [ "Development Status :: 4 - Beta", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14", "Programming Language :: Rust", "Topic :: System :: Networking", "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",]
+keywords = [ "rdp", "remote-desktop", "automation", "screen-capture",]
+dependencies = [ "pyspnego>=0.12.0", "pyasn1>=0.6.2", "pillow>=12.1.0", "asn1crypto>=1.5.1", "python-dotenv>=1.0.0",]
+
+[build-system]
+requires = [ "maturin>=1.8,<2.0",]
+build-backend = "maturin"
+
+[project.license]
+text = "MIT"
 
 [project.optional-dependencies]
-mcp = [
-    "fastmcp>=2.0.0",
-]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.14.14",
-    "mypy>=1.19.1",
-    "pre-commit>=4.5.1",
-    "rich>=14.3.1",
-    "python-docx>=1.2.0",
-]
-docs = [
-    "mkdocs>=1.6.0",
-    "mkdocs-material>=9.5.0",
-    "mkdocstrings[python]>=0.26.0",
-]
+mcp = [ "fastmcp>=2.0.0",]
+dev = [ "pytest>=8.0", "pytest-asyncio>=1.3.0", "pytest-cov>=7.0.0", "ruff>=0.14.14", "mypy>=1.19.1", "pre-commit>=4.5.1", "rich>=14.3.1", "python-docx>=1.2.0",]
+docs = [ "mkdocs>=1.6.0", "mkdocs-material>=9.5.0", "mkdocstrings[python]>=0.26.0",]
 
 [project.urls]
 Homepage = "https://github.com/abi-jey/simple-rdp"
 Repository = "https://github.com/abi-jey/simple-rdp"
 Documentation = "https://abi-jey.github.io/simple-rdp/"
 
-[build-system]
-requires = ["maturin>=1.8,<2.0"]
-build-backend = "maturin"
+[project.scripts]
+simple-rdp-mcp = "simple_rdp_mcp.server:run_server"
 
 [tool.maturin]
-# Python source is in src/simple_rdp
 python-source = "src"
-# The Rust module will be installed as simple_rdp._rle
 module-name = "simple_rdp._rle"
-# Include Python files in the wheel
-include = ["src/**/*.py"]
-# Features to activate
-features = ["pyo3/extension-module"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-asyncio_mode = "auto"
+include = [ "src/**/*.py",]
+features = [ "pyo3/extension-module",]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-
-[tool.ruff.lint.isort]
-force-single-line = true
-
-[tool.ruff.format]
-quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"
@@ -93,17 +47,30 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 mypy_path = "src"
-exclude = ["tests/", "agents/", "examples/", "simple_rdp_mcp/"]
+exclude = [ "tests/", "agents/", "examples/", "simple_rdp_mcp/",]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = [ "tests",]
+pythonpath = [ "src",]
+asyncio_mode = "auto"
+
+[tool.ruff.lint]
+select = [ "E", "F", "I", "UP", "B", "SIM",]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint.isort]
+force-single-line = true
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
 mkdocs-material = "^9.7.1"
-mkdocstrings = {extras = ["python"], version = "^1.0.2"}
 
 [tool.poetry.group.mcp.dependencies]
 fastmcp = "^2.0.0"
 
-[project.scripts]
-simple-rdp-mcp = "simple_rdp_mcp.server:run_server"
-
+[tool.poetry.group.docs.dependencies.mkdocstrings]
+extras = [ "python",]
+version = "^1.0.2"
