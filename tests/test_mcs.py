@@ -467,6 +467,24 @@ class TestMcsParsingFunctions:
             parse_mcs_channel_join_confirm(data)
 
 
+class TestMcsConnectResponseParsing:
+    """Tests for MCS Connect Response parsing."""
+
+    def test_parse_mcs_connect_response_wrong_tag(self) -> None:
+        """Test parsing MCS connect response with wrong APPLICATION tag."""
+        # Wrong tag - not 0x7F 0x66
+        data = bytes([0x00, 0x00, 0x00])
+        with pytest.raises(ValueError, match="Expected MCS Connect Response"):
+            parse_mcs_connect_response(data)
+
+    def test_parse_mcs_connect_response_wrong_type(self) -> None:
+        """Test parsing MCS connect response with wrong type byte."""
+        # Right 0x7F but wrong type (0x65 instead of 0x66)
+        data = bytes([0x7F, 0x65, 0x00])
+        with pytest.raises(ValueError, match="Expected MCS Connect Response"):
+            parse_mcs_connect_response(data)
+
+
 class TestMcsSendDataRequestLengths:
     """Tests for MCS Send Data Request with different lengths."""
 
