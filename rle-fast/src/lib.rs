@@ -488,7 +488,7 @@ fn decompress_rle<'py>(
         decoder.decompress()
     });
 
-    Ok(PyBytes::new_bound(py, &result))
+    Ok(PyBytes::new(py, &result))
 }
 
 /// Fast RLE bitmap decompression for RDP.
