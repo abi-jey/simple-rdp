@@ -11,17 +11,26 @@
 pip install simple-rdp
 ```
 
+This installs Simple RDP with the native Rust extension for high-performance RLE bitmap decompression, providing up to 100x faster screenshot performance.
+
 ## Install from source
 
-### Using Poetry (recommended)
+Building from source requires the Rust toolchain.
+
+### Prerequisites
+
+1. Install Rust from [rustup.rs](https://rustup.rs/)
+2. Install maturin: `pip install maturin`
+
+### Using maturin (recommended)
 
 ```bash
 git clone https://github.com/abi-jey/simple-rdp.git
 cd simple-rdp
-poetry install
+maturin develop --release
 ```
 
-### Using pip
+### Using pip with build
 
 ```bash
 git clone https://github.com/abi-jey/simple-rdp.git
@@ -29,39 +38,26 @@ cd simple-rdp
 pip install -e .
 ```
 
-## Optional: Rust Acceleration
-
-Simple RDP includes an optional Rust extension for 100x faster RLE bitmap decompression. This significantly improves screenshot performance.
-
-### Prerequisites
-
-- Rust toolchain (install from [rustup.rs](https://rustup.rs/))
-- Maturin: `pip install maturin`
-
-### Building the Rust extension
-
-The Rust extension is built as part of the main package when using maturin:
-
-```bash
-# Build and install with Rust extension
-maturin develop --release
-```
-
-The library automatically uses the Rust extension when available, falling back to pure Python otherwise.
-
-### Performance Comparison
-
-| Mode | Screenshot FPS | Event Loop Usage |
-|------|---------------|------------------|
-| Pure Python | ~15 FPS | ~50% |
-| Rust Acceleration | ~30 FPS | ~10% |
-
 ## Verify Installation
 
 ```python
 import simple_rdp
 print(simple_rdp.__version__)
+
+# Verify Rust extension is loaded
+from simple_rdp._rle import decompress_rle
+print("Rust extension loaded successfully")
 ```
+
+## Performance
+
+The native Rust extension provides significant performance improvements:
+
+| Metric | Performance |
+|--------|-------------|
+| Screenshot FPS | ~30 FPS |
+| Event Loop Usage | ~10% |
+| RLE Decompression | 100x faster than pure Python |
 
 ## Dependencies
 
@@ -72,3 +68,13 @@ Simple RDP depends on the following packages (automatically installed):
 - `pillow` - Image processing
 - `asn1crypto` - Additional ASN.1 support
 - `python-dotenv` - Environment variable loading
+
+## Optional: MCP Server
+
+To use Simple RDP with AI agents via the Model Context Protocol:
+
+```bash
+pip install simple-rdp[mcp]
+```
+
+See the [MCP Server guide](../guide/mcp-server.md) for usage details.

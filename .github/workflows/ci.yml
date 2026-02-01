@@ -27,10 +27,10 @@ on:
 
 jobs:
   # =============================================================================
-  # LINT (using pre-commit - includes ruff, mypy, cargo fmt, clippy)
+  # LINT
   # =============================================================================
   lint:
-    name: Lint (pre-commit)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,68 +48,14 @@ jobs:
         run: pre-commit run --all-files
 
   # =============================================================================
-  # TEST
+  # LINUX - Test & Build
   # =============================================================================
-  test:
-    name: Test (${{ matrix.os }} py${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
+  linux:
+    name: Linux (${{ matrix.target }}, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
     needs: [lint]
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.11', '3.12', '3.13', '3.14']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: dtolnay/rust-toolchain@stable
-      
-      - name: Build and install package
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release
-      
-      - name: Install wheel
-        run: pip install target/wheels/*.whl
-        shell: bash
-      
-      - name: Verify import
-        run: python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
-      
-      - name: Install test dependencies
-        run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
-      
-      - name: Copy tests to temp and run with coverage
-        shell: bash
-        run: |
-          # Copy tests to a temp directory so pytest doesn't pick up src/simple_rdp
-          cp -r tests /tmp/tests
-          cd /tmp
-          pytest tests/ --ignore=tests/e2e -v --cov=simple_rdp --cov-report=xml --cov-report=term-missing
-          # Move coverage file back to workspace
-          cp coverage.xml $GITHUB_WORKSPACE/coverage.xml
-          ls -la $GITHUB_WORKSPACE/coverage.xml
-      
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
-
-  # =============================================================================
-  # BUILD WHEELS
-  # =============================================================================
-  build-linux:
-    name: Build (Linux ${{ matrix.target }} py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    needs: [test]
-    strategy:
       matrix:
         target: [x86_64, aarch64]
         python-version: ['3.11', '3.12', '3.13', '3.14']
@@ -117,7 +63,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
       
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -127,23 +74,48 @@ jobs:
           sccache: true
           manylinux: auto
       
+      # Only run tests on x86_64 (native architecture)
+      - name: Install wheel and test
+        if: matrix.target == 'x86_64'
+        run: |
+          pip install dist/*.whl
+          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v --cov=simple_rdp --cov-report=xml --cov-report=term-missing
+          cp coverage.xml $GITHUB_WORKSPACE/coverage.xml
+      
+      - name: Upload coverage
+        if: matrix.python-version == '3.12' && matrix.target == 'x86_64'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
-  build-windows:
-    name: Build (Windows py${{ matrix.python-version }})
+  # =============================================================================
+  # WINDOWS - Test & Build
+  # =============================================================================
+  windows:
+    name: Windows (py${{ matrix.python-version }})
     runs-on: windows-latest
-    needs: [test]
+    needs: [lint]
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
       
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -152,16 +124,30 @@ jobs:
           args: --release --out dist -i ${{ matrix.python-version }}
           sccache: true
       
+      - name: Install wheel and test
+        shell: bash
+        run: |
+          pip install dist/*.whl
+          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v
+      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-windows-x64-py${{ matrix.python-version }}
           path: dist
 
-  build-macos:
-    name: Build (macOS ${{ matrix.target }} py${{ matrix.python-version }})
+  # =============================================================================
+  # MACOS - Test & Build
+  # =============================================================================
+  macos:
+    name: macOS (${{ matrix.target }}, py${{ matrix.python-version }})
     runs-on: macos-latest
-    needs: [test]
+    needs: [lint]
     strategy:
+      fail-fast: false
       matrix:
         target: [x86_64, aarch64]
         python-version: ['3.11', '3.12', '3.13', '3.14']
@@ -169,7 +155,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
       
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -178,15 +165,29 @@ jobs:
           args: --release --out dist -i ${{ matrix.python-version }}
           sccache: true
       
+      # Only run tests on native architecture (aarch64 on macos-latest)
+      - name: Install wheel and test
+        if: matrix.target == 'aarch64'
+        run: |
+          pip install dist/*.whl
+          python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works')"
+          pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v
+      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
-  build-sdist:
-    name: Build sdist
+  # =============================================================================
+  # SOURCE DISTRIBUTION
+  # =============================================================================
+  sdist:
+    name: Source Distribution
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [lint]
     steps:
       - uses: actions/checkout@v4
       - name: Build sdist
@@ -201,12 +202,12 @@ jobs:
           path: dist
 
   # =============================================================================
-  # PUBLISH
+  # PUBLISH (Stable Release)
   # =============================================================================
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos, build-sdist]
+    needs: [linux, windows, macos, sdist]
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -235,11 +236,9 @@ jobs:
         run: |
           import toml
           import os
-          import re
           
           bump_type = "${{ inputs.version_bump }}"
           
-          # Read current version from pyproject.toml
           with open('pyproject.toml', 'r') as f:
               config = toml.load(f)
           
@@ -259,12 +258,10 @@ jobs:
           
           new_version = f"{major}.{minor}.{patch}"
           
-          # Update pyproject.toml
           config['project']['version'] = new_version
           with open('pyproject.toml', 'w') as f:
               toml.dump(config, f)
           
-          # Update Cargo.toml
           with open('Cargo.toml', 'r') as f:
               cargo = toml.load(f)
           cargo['package']['version'] = new_version
@@ -301,18 +298,23 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git pull --rebase origin main
           git add pyproject.toml Cargo.toml
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}" || true
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}"
+          git pull --rebase origin main
           git push
       
-      - name: Build wheels with new version
+      # When version is bumped, we need to rebuild wheels with new version
+      - name: Setup Rust
+        if: steps.bump.outputs.bumped == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Build all wheels with new version
         if: steps.bump.outputs.bumped == 'true'
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist
       
-      - name: Download all artifacts
+      - name: Download pre-built artifacts
         if: steps.bump.outputs.bumped != 'true'
         uses: actions/download-artifact@v4
         with:
@@ -331,20 +333,16 @@ jobs:
       
       - name: Get previous stable tag
         id: prev_tag
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
         run: |
-          # Get the previous stable tag (exclude dev tags)
-          PREV_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -v 'dev' | head -2 | tail -1)
+          # Get stable tags (exclude dev/alpha/beta)
+          PREV_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1)
           if [ -z "$PREV_TAG" ]; then
-            # If no previous tag, use first commit
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
           echo "Previous stable tag: $PREV_TAG"
       
       - name: Generate release notes
-        id: release_notes
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
         run: |
           VERSION="${{ steps.bump.outputs.version || steps.version.outputs.version }}"
           PREV_TAG="${{ steps.prev_tag.outputs.prev_tag }}"
@@ -352,7 +350,6 @@ jobs:
           echo "## What's Changed" > release_notes.md
           echo "" >> release_notes.md
           
-          # Get commits between previous tag and HEAD
           git log ${PREV_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges >> release_notes.md
           
           echo "" >> release_notes.md
@@ -362,7 +359,6 @@ jobs:
           cat release_notes.md
       
       - name: Create GitHub Release
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.version || steps.version.outputs.version }}
@@ -376,7 +372,7 @@ jobs:
   publish-dev:
     name: Publish Dev
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos, build-sdist]
+    needs: [linux, windows, macos, sdist]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: pypi
@@ -393,7 +389,9 @@ jobs:
         with:
           python-version: '3.12'
       
-      - name: Install maturin
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install dependencies
         run: pip install maturin toml
       
       - name: Generate dev version
@@ -409,17 +407,13 @@ jobs:
           base_version = config['project']['version']
           timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
           
-          # Use PEP 440 dev format for Python: 0.1.0.dev20260201044504
           python_version = f"{base_version}.dev{timestamp}"
-          # Use semver format for Cargo: 0.1.0-dev.20260201044504
           cargo_version = f"{base_version}-dev.{timestamp}"
           
-          # Update pyproject.toml with PEP 440 version
           config['project']['version'] = python_version
           with open('pyproject.toml', 'w') as f:
               toml.dump(config, f)
           
-          # Update Cargo.toml with semver version
           with open('Cargo.toml', 'r') as f:
               cargo = toml.load(f)
           cargo['package']['version'] = cargo_version
@@ -429,8 +423,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version={python_version}\n")
           
-          print(f"Python version: {python_version}")
-          print(f"Cargo version: {cargo_version}")
+          print(f"Dev version: {python_version}")
         shell: python
       
       - name: Build wheels
