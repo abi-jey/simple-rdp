@@ -40,7 +40,7 @@ const BLACK: u8 = 0xFE;
 
 // Masks
 const MASK_REGULAR_RUN_LENGTH: u8 = 0x1F; // 5 bits for regular orders
-const MASK_LITE_RUN_LENGTH: u8 = 0x0F;    // 4 bits for lite orders
+const MASK_LITE_RUN_LENGTH: u8 = 0x0F; // 4 bits for lite orders
 
 /// RLE decompression state machine
 struct RleDecoder<'a> {
@@ -85,7 +85,7 @@ impl<'a> RleDecoder<'a> {
 
         // Calculate row delta (scanline width in bytes, padded to 4-byte boundary)
         let actual_row_bytes = width * bytes_per_pixel;
-        let row_delta = if actual_row_bytes % 4 != 0 {
+        let row_delta = if !actual_row_bytes.is_multiple_of(4) {
             actual_row_bytes + (4 - actual_row_bytes % 4)
         } else {
             actual_row_bytes
@@ -483,7 +483,7 @@ fn decompress_rle<'py>(
 
     // Release the GIL during heavy computation
     // This allows the asyncio event loop to continue processing
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         let mut decoder = RleDecoder::new(&input_copy, width, height, bpp, has_header);
         decoder.decompress()
     });
