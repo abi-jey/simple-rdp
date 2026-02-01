@@ -400,3 +400,52 @@ class TestVideoChunkEdgeCases:
         """Test VideoChunk with negative timestamp."""
         chunk = VideoChunk(data=b"\x00", timestamp=-1.0, sequence=0)
         assert chunk.timestamp == -1.0
+
+
+class TestDisplayVideoChunkManagement:
+    """Tests for Display video chunk management."""
+
+    def test_clear_video_chunks_resets_buffer_size(self) -> None:
+        """Test clear_video_chunks resets the buffer size counter."""
+        display = Display(width=100, height=100)
+        # Manually add a video chunk to simulate encoding
+        chunk = VideoChunk(data=b"\x00" * 1000, timestamp=1.0, sequence=0)
+        display._video_chunks.append(chunk)
+        display._video_buffer_size = 1000
+        
+        display.clear_video_chunks()
+        
+        assert display._video_buffer_size == 0
+        assert len(display._video_chunks) == 0
+
+    def test_get_video_chunks_returns_list(self) -> None:
+        """Test get_video_chunks returns a list."""
+        display = Display(width=100, height=100)
+        chunks = display.get_video_chunks()
+        assert isinstance(chunks, list)
+        assert len(chunks) == 0
+
+    def test_get_video_chunks_with_data(self) -> None:
+        """Test get_video_chunks with some chunks."""
+        display = Display(width=100, height=100)
+        chunk1 = VideoChunk(data=b"\x00" * 100, timestamp=1.0, sequence=0)
+        chunk2 = VideoChunk(data=b"\x01" * 100, timestamp=2.0, sequence=1)
+        display._video_chunks.append(chunk1)
+        display._video_chunks.append(chunk2)
+        
+        chunks = display.get_video_chunks()
+        assert len(chunks) == 2
+        assert chunks[0].sequence == 0
+        assert chunks[1].sequence == 1
+
+
+class TestDisplayConstants:
+    """Tests for Display class constants."""
+
+    def test_default_max_video_buffer_mb(self) -> None:
+        """Test default max video buffer constant."""
+        assert Display.DEFAULT_MAX_VIDEO_BUFFER_MB == 100
+
+    def test_default_max_raw_frames(self) -> None:
+        """Test default max raw frames constant."""
+        assert Display.DEFAULT_MAX_RAW_FRAMES == 300
