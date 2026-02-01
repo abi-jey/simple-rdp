@@ -463,3 +463,95 @@ class TestAsn1LengthLarge:
         assert result[0] == 0x82
         assert result[1] == 0xFF
         assert result[2] == 0xFF
+
+
+class TestCredSSPAuthComputeHash:
+    """Tests for CredSSPAuth hash computation methods."""
+
+    def test_compute_client_server_hash(self) -> None:
+        """Test computing client-to-server hash."""
+        from simple_rdp.credssp import CredSSPAuth, CLIENT_SERVER_HASH_MAGIC
+        from hashlib import sha256
+        
+        auth = CredSSPAuth(hostname="test", username="u", password="p")
+        public_key = b"test_public_key_data"
+        
+        # Compute expected hash
+        expected = sha256(CLIENT_SERVER_HASH_MAGIC + auth.client_nonce + public_key).digest()
+        result = auth.compute_client_server_hash(public_key)
+        
+        assert result == expected
+
+    def test_compute_server_client_hash(self) -> None:
+        """Test computing server-to-client hash."""
+        from simple_rdp.credssp import CredSSPAuth, SERVER_CLIENT_HASH_MAGIC
+        from hashlib import sha256
+        
+        auth = CredSSPAuth(hostname="test", username="u", password="p")
+        public_key = b"test_public_key_data"
+        
+        # Compute expected hash
+        expected = sha256(SERVER_CLIENT_HASH_MAGIC + auth.client_nonce + public_key).digest()
+        result = auth.compute_server_client_hash(public_key)
+        
+        assert result == expected
+
+
+class TestCredSSPAuthSetters:
+    """Tests for CredSSPAuth property setters."""
+
+    def test_set_server_public_key(self) -> None:
+        """Test setting server public key."""
+        from simple_rdp.credssp import CredSSPAuth
+        
+        auth = CredSSPAuth(hostname="test", username="u", password="p")
+        public_key = b"server_public_key"
+        auth.set_server_public_key(public_key)
+        assert auth._server_public_key == public_key
+
+
+class TestTsCredentialsBuild:
+    """Tests for building TS credentials."""
+
+    def test_build_ts_credentials_unicode(self) -> None:
+        """Test building TS credentials with unicode strings."""
+        result = build_ts_credentials(
+            domain="MYDOMAIN",
+            username="myuser",
+            password="mypassword123!"
+        )
+        assert isinstance(result, bytes)
+        # Should contain the encoded strings
+        assert len(result) > 0
+
+    def test_build_ts_credentials_empty_domain(self) -> None:
+        """Test building TS credentials with empty domain."""
+        result = build_ts_credentials(
+            domain="",
+            username="user",
+            password="pass"
+        )
+        assert isinstance(result, bytes)
+
+
+class TestAsn1IntegerEdgeCases:
+    """Edge case tests for ASN.1 integer encoding."""
+
+    def test_encode_integer_exactly_128(self) -> None:
+        """Test encoding integer 128 (boundary case)."""
+        result = _encode_asn1_integer(128)
+        assert result[0] == ASN1_INTEGER
+        # 128 needs padding to avoid negative interpretation
+        assert len(result) >= 3
+
+    def test_encode_integer_255(self) -> None:
+        """Test encoding integer 255."""
+        result = _encode_asn1_integer(255)
+        assert result[0] == ASN1_INTEGER
+        assert len(result) >= 3
+
+    def test_encode_integer_256(self) -> None:
+        """Test encoding integer 256 (2 bytes needed)."""
+        result = _encode_asn1_integer(256)
+        assert result[0] == ASN1_INTEGER
+        assert len(result) >= 4
