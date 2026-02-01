@@ -377,3 +377,89 @@ class TestAsn1EncodingEdgeCases:
         
         result2 = _encode_asn1_context(ASN1_CONTEXT_2, content)
         assert result2[0] == ASN1_CONTEXT_2
+
+
+class TestParseTsRequestAdvanced:
+    """Advanced tests for TSRequest parsing to cover all branches."""
+
+    def test_parse_ts_request_with_pub_key_auth(self) -> None:
+        """Test parsing TSRequest with pubKeyAuth field."""
+        # Build a request with pubKeyAuth and parse it back
+        pub_key_auth = b"test_pub_key_auth_data"
+        original = build_ts_request_with_pub_key_auth(pub_key_auth=pub_key_auth)
+        result = parse_ts_request(original)
+        assert "pub_key_auth" in result
+        assert result["pub_key_auth"] == pub_key_auth
+
+    def test_parse_ts_request_with_client_nonce(self) -> None:
+        """Test parsing TSRequest with clientNonce field."""
+        pub_key_auth = b"encrypted_key"
+        client_nonce = b"c" * NONCE_SIZE
+        original = build_ts_request_with_pub_key_auth(
+            pub_key_auth=pub_key_auth,
+            client_nonce=client_nonce,
+        )
+        result = parse_ts_request(original)
+        assert "client_nonce" in result
+        assert result["client_nonce"] == client_nonce
+
+    def test_parse_ts_request_with_auth_info(self) -> None:
+        """Test parsing TSRequest with authInfo field."""
+        auth_info = b"encrypted_creds_data"
+        original = build_ts_request_with_credentials(auth_info=auth_info)
+        result = parse_ts_request(original)
+        assert "auth_info" in result
+        assert result["auth_info"] == auth_info
+
+    def test_parse_ts_request_invalid_not_sequence(self) -> None:
+        """Test parsing TSRequest fails if not a SEQUENCE."""
+        # Build invalid data that's not a SEQUENCE
+        invalid_data = bytes([ASN1_INTEGER, 0x01, 0x05])
+        with pytest.raises(ValueError, match="Expected SEQUENCE"):
+            parse_ts_request(invalid_data)
+
+
+class TestCredSSPAuthAdvanced:
+    """Advanced tests for CredSSPAuth class."""
+
+    def test_credssp_auth_complete_attribute(self) -> None:
+        """Test CredSSPAuth complete attribute."""
+        from simple_rdp.credssp import CredSSPAuth
+        
+        auth = CredSSPAuth(hostname="test", username="u", password="p")
+        # Initially, complete is False (depends on underlying SPNEGO context)
+        # This just accesses the property
+        _ = auth.complete
+
+    def test_credssp_auth_hostname_stored(self) -> None:
+        """Test CredSSPAuth stores hostname."""
+        from simple_rdp.credssp import CredSSPAuth
+        
+        auth = CredSSPAuth(hostname="myserver.local", username="u", password="p")
+        assert auth._hostname == "myserver.local"
+
+    def test_credssp_auth_domain_stored(self) -> None:
+        """Test CredSSPAuth stores domain."""
+        from simple_rdp.credssp import CredSSPAuth
+        
+        auth = CredSSPAuth(hostname="test", username="u", password="p", domain="MYDOMAIN")
+        assert auth._domain == "MYDOMAIN"
+
+
+class TestAsn1LengthLarge:
+    """Tests for ASN.1 length encoding with large values."""
+
+    def test_encode_asn1_length_large_3byte(self) -> None:
+        """Test encoding length requiring 3-byte form."""
+        # 0x10000 = 65536
+        result = _encode_asn1_length(0x10000)
+        # Should use 0x83 prefix for 3-byte length
+        assert result[0] == 0x83
+        assert len(result) == 4
+
+    def test_encode_asn1_length_medium_large(self) -> None:
+        """Test encoding length near 2-byte boundary."""
+        result = _encode_asn1_length(0xFFFF)  # 65535
+        assert result[0] == 0x82
+        assert result[1] == 0xFF
+        assert result[2] == 0xFF
