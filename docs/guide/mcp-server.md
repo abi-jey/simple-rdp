@@ -18,72 +18,53 @@ poetry install --extras mcp
 
 ## Running the Server
 
-### Using the CLI
+The MCP server **requires** RDP connection parameters via environment variables and connects automatically on startup. No saved artifacts are created unless session recording is explicitly enabled.
+
+### Environment Variables (Required)
 
 ```bash
-# Run with stdio transport (default)
+export RDP_HOST=192.168.1.100    # Required: RDP server hostname
+export RDP_USER=your_username    # Required for NLA auth
+export RDP_PASS=your_password    # Required for NLA auth
+export RDP_DOMAIN=MYDOMAIN       # Optional: Windows domain
+export RDP_PORT=3389             # Optional: default 3389
+export RDP_WIDTH=1920            # Optional: default 1920
+export RDP_HEIGHT=1080           # Optional: default 1080
+```
+
+### Session Recording (Optional)
+
+To record the session to a video file:
+
+```bash
+export RDP_RECORD_SESSION=/path/to/recording.mp4
+```
+
+When set, the session will be recorded and saved to this path when the server shuts down.
+
+### Starting the Server
+
+```bash
+# Run with stdio transport (default for Claude Desktop)
 simple-rdp-mcp
 
-# Or using fastmcp CLI
-fastmcp run simple_rdp_mcp.server:mcp
-
-# Run with HTTP transport
+# Or using fastmcp CLI with HTTP transport
 fastmcp run simple_rdp_mcp.server:mcp --transport http --port 8000
 ```
 
-### As a Python Module
-
-```python
-from simple_rdp_mcp import mcp
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-## Configuration
-
-The MCP server uses environment variables for default RDP connection settings:
-
-```bash
-export RDP_HOST=192.168.1.100
-export RDP_USER=your_username
-export RDP_PASS=your_password
-export RDP_DOMAIN=MYDOMAIN  # optional
-```
-
-You can also provide credentials directly when calling `rdp_connect()`.
-
 ## Available Tools
-
-### `rdp_connect`
-
-Connect to a Windows RDP server.
-
-**Parameters:**
-
-- `host` (optional): RDP server hostname. Uses `RDP_HOST` env var if not provided.
-- `username` (optional): Username. Uses `RDP_USER` env var if not provided.
-- `password` (optional): Password. Uses `RDP_PASS` env var if not provided.
-- `domain` (optional): Windows domain. Uses `RDP_DOMAIN` env var if not provided.
-- `port`: RDP port (default: 3389)
-- `width`: Desktop width in pixels (default: 1920)
-- `height`: Desktop height in pixels (default: 1080)
-
-### `rdp_disconnect`
-
-Disconnect from the current RDP session.
-
-### `rdp_status`
-
-Get the current RDP connection status.
-
-**Returns:** Connection status, host, and desktop dimensions.
 
 ### `rdp_screenshot`
 
 Capture a screenshot of the remote desktop.
 
 **Returns:** PNG image of the current screen.
+
+### `rdp_status`
+
+Get the current RDP connection status.
+
+**Returns:** Connection status, host, desktop dimensions, and recording status.
 
 ### `rdp_mouse_move`
 
@@ -147,25 +128,21 @@ Send a keyboard key press.
     - A hex scancode (e.g., "0x1C" for Enter)
 - `modifiers`: List of modifier keys to hold: "ctrl", "alt", "shift", "win"
 
-**Examples:**
+### `rdp_start_recording`
 
-```python
-# Send Enter key
-await rdp_send_key("enter")
+Start recording the session to video. Use this to record specific actions.
 
-# Copy (Ctrl+C)
-await rdp_send_key("c", modifiers=["ctrl"])
+### `rdp_stop_recording`
 
-# Alt+Tab
-await rdp_send_key("tab", modifiers=["alt"])
+Stop recording and save to file.
 
-# Ctrl+Alt+Delete
-await rdp_send_key("delete", modifiers=["ctrl", "alt"])
-```
+**Parameters:**
+
+- `save_path`: Path to save the recording (e.g., '/tmp/session.mp4')
 
 ## Usage with Claude Desktop
 
-Add the MCP server to your Claude Desktop configuration:
+Add the MCP server to your Claude Desktop configuration (`~/.config/claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -182,26 +159,107 @@ Add the MCP server to your Claude Desktop configuration:
 }
 ```
 
-## Example Agent Workflow
+With session recording:
 
-Here's how an LLM agent might use the RDP tools:
+```json
+{
+  "mcpServers": {
+    "simple-rdp": {
+      "command": "simple-rdp-mcp",
+      "env": {
+        "RDP_HOST": "192.168.1.100",
+        "RDP_USER": "your_username",
+        "RDP_PASS": "your_password",
+        "RDP_RECORD_SESSION": "/tmp/rdp_session.mp4"
+      }
+    }
+  }
+}
+```
 
-1. **Connect**: `rdp_connect(host="192.168.1.100", username="admin", password="****")`
-2. **Take screenshot**: `rdp_screenshot()` - to see the current desktop state
-3. **Click on Start menu**: `rdp_mouse_click(x=30, y=1060)`
-4. **Take screenshot**: to see the Start menu opened
-5. **Type search**: `rdp_type_text("notepad")`
-6. **Press Enter**: `rdp_send_key("enter")`
-7. **Take screenshot**: to verify Notepad opened
-8. **Type content**: `rdp_type_text("Hello from AI!")`
-9. **Save file**: `rdp_send_key("s", modifiers=["ctrl"])`
-10. **Disconnect**: `rdp_disconnect()`
+## Programmatic Usage (without MCP)
+
+The same functions are available for direct Python use without the MCP server:
+
+```python
+import asyncio
+from simple_rdp_mcp import (
+    connect,
+    disconnect,
+    screenshot,
+    mouse_click,
+    type_text,
+    send_key,
+)
+
+async def automate_rdp():
+    # Connect to RDP server
+    await connect(
+        host="192.168.1.100",
+        username="admin",
+        password="password",
+        record_session="/tmp/session.mp4",  # Optional recording
+    )
+    
+    # Take a screenshot
+    img = await screenshot()
+    img.save("desktop.png")
+    
+    # Click on something
+    await mouse_click(100, 200)
+    
+    # Type some text
+    await type_text("Hello, World!")
+    
+    # Press Enter
+    await send_key("enter")
+    
+    # Use keyboard shortcuts
+    await send_key("s", modifiers=["ctrl"])  # Ctrl+S
+    
+    # Disconnect (saves recording if enabled)
+    await disconnect()
+
+asyncio.run(automate_rdp())
+```
+
+### Using with Your Own Async Loop
+
+```python
+import asyncio
+from simple_rdp_mcp import connect, screenshot, mouse_click, disconnect
+
+async def main():
+    await connect("192.168.1.100", "user", "pass")
+    
+    # Run your automation
+    for i in range(10):
+        img = await screenshot()
+        print(f"Frame {i}: {img.size}")
+        await asyncio.sleep(1)
+    
+    await disconnect()
+
+# Run in existing event loop
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
+```
+
+## Key Differences from MCP Mode
+
+| Feature | MCP Server Mode | Programmatic Mode |
+|---------|----------------|-------------------|
+| Connection | Auto-connect on startup via env vars | Manual `connect()` call |
+| Recording | Via `RDP_RECORD_SESSION` env var | Via `record_session` parameter |
+| Cleanup | Auto-disconnect on shutdown | Manual `disconnect()` call |
+| Tools | MCP tool wrappers | Direct async functions |
 
 ## Security Considerations
 
 !!! warning "Security Warning"
     
-    - RDP credentials are passed through the MCP protocol
+    - RDP credentials are passed through environment variables or function parameters
     - The server maintains a single active RDP connection
     - This library does NOT validate TLS certificates
     - Only use in trusted environments
+    - No artifacts are saved unless explicitly requested (recording)

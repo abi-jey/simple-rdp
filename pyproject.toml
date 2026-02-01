@@ -105,5 +105,5 @@ mkdocstrings = {extras = ["python"], version = "^1.0.2"}
 fastmcp = "^3.0.0"
 
 [project.scripts]
-simple-rdp-mcp = "simple_rdp_mcp.server:mcp.run"
+simple-rdp-mcp = "simple_rdp_mcp.server:run_server"
 

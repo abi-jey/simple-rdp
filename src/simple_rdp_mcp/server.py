@@ -3,247 +3,347 @@ Simple RDP MCP Server.
 
 This module provides an MCP server that exposes RDP client capabilities
 as tools for LLM agents to interact with remote Windows desktops.
+
+The server connects to an RDP server on startup and provides tools for:
+- Taking screenshots
+- Mouse movement, clicks, and drags
+- Keyboard input (typing and key presses)
+- Session recording (optional)
+
+Usage:
+    # With environment variables
+    export RDP_HOST=192.168.1.100
+    export RDP_USER=username
+    export RDP_PASS=password
+    simple-rdp-mcp
+
+    # With session recording
+    export RDP_RECORD_SESSION=/path/to/recording.mp4
+    simple-rdp-mcp
 """
 
-import base64
+from __future__ import annotations
+
+import asyncio
+import contextlib
 import io
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Annotated
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image as MCPImage
+from PIL import Image
 from pydantic import Field
 
 from simple_rdp import RDPClient
+from simple_rdp.display import Display
 
 load_dotenv()
 
-# Create the MCP server
-mcp = FastMCP(
-    name="Simple RDP",
-    instructions="""
-    This MCP server provides tools to interact with a remote Windows desktop via RDP.
-    
-    You can:
-    - Connect to an RDP server and take screenshots
-    - Move and click the mouse at specific coordinates
-    - Type text and send keyboard keys
-    - Drag the mouse from one position to another
-    
-    Typical workflow:
-    1. Connect to the RDP server using rdp_connect()
-    2. Take a screenshot to see the current state with rdp_screenshot()
-    3. Interact using mouse and keyboard tools
-    4. Take screenshots to verify your actions
-    5. Disconnect when done with rdp_disconnect()
-    """,
-)
 
-# Global RDP client instance
-_rdp_client: RDPClient | None = None
+# =============================================================================
+# Configuration
+# =============================================================================
 
 
-def _get_client() -> RDPClient:
-    """Get the current RDP client, raising an error if not connected."""
-    if _rdp_client is None or not _rdp_client.is_connected:
-        raise RuntimeError(
-            "Not connected to RDP server. Use rdp_connect() first."
+@dataclass
+class RDPConfig:
+    """RDP connection configuration."""
+
+    host: str
+    username: str | None = None
+    password: str | None = None
+    domain: str | None = None
+    port: int = 3389
+    width: int = 1920
+    height: int = 1080
+    record_session: str | None = None  # Path to save session recording
+
+    @classmethod
+    def from_env(cls) -> RDPConfig:
+        """Create config from environment variables."""
+        host = os.getenv("RDP_HOST")
+        if not host:
+            raise ValueError(
+                "RDP_HOST environment variable is required. Set RDP_HOST, RDP_USER, RDP_PASS to connect on startup."
+            )
+
+        return cls(
+            host=host,
+            username=os.getenv("RDP_USER"),
+            password=os.getenv("RDP_PASS"),
+            domain=os.getenv("RDP_DOMAIN"),
+            port=int(os.getenv("RDP_PORT", "3389")),
+            width=int(os.getenv("RDP_WIDTH", "1920")),
+            height=int(os.getenv("RDP_HEIGHT", "1080")),
+            record_session=os.getenv("RDP_RECORD_SESSION"),
         )
-    return _rdp_client
 
 
-@mcp.tool(
-    annotations={
-        "title": "Connect to RDP Server",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": True,
-    }
-)
-async def rdp_connect(
-    host: Annotated[str | None, "RDP server hostname or IP. Uses RDP_HOST env var if not provided."] = None,
-    username: Annotated[str | None, "Username for authentication. Uses RDP_USER env var if not provided."] = None,
-    password: Annotated[str | None, "Password for authentication. Uses RDP_PASS env var if not provided."] = None,
-    domain: Annotated[str | None, "Windows domain (optional). Uses RDP_DOMAIN env var if not provided."] = None,
-    port: Annotated[int, "RDP server port"] = 3389,
-    width: Annotated[int, "Desktop width in pixels"] = 1920,
-    height: Annotated[int, "Desktop height in pixels"] = 1080,
+# =============================================================================
+# RDP Session Manager
+# =============================================================================
+
+
+@dataclass
+class RDPSession:
+    """Manages an active RDP session with optional recording."""
+
+    client: RDPClient
+    config: RDPConfig
+    display: Display | None = None
+    _recording: bool = field(default=False, init=False)
+    _frame_task: asyncio.Task | None = field(default=None, init=False)
+
+    @property
+    def is_connected(self) -> bool:
+        return self.client.is_connected
+
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
+    async def start_recording(self) -> None:
+        """Start recording the session."""
+        if self._recording:
+            return
+
+        self.display = Display(
+            width=self.config.width,
+            height=self.config.height,
+            fps=30,
+        )
+        await self.display.start_encoding()
+        self._recording = True
+
+        # Start background task to capture frames
+        self._frame_task = asyncio.create_task(self._capture_frames())
+
+    async def stop_recording(self, save_path: str | None = None) -> str | None:
+        """Stop recording and optionally save to file."""
+        if not self._recording:
+            return None
+
+        self._recording = False
+
+        # Cancel frame capture task
+        if self._frame_task:
+            self._frame_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._frame_task
+            self._frame_task = None
+
+        # Stop encoding
+        if self.display:
+            await self.display.stop_encoding()
+
+            # Save if path provided
+            if save_path:
+                success = await self.display.save_video(save_path)
+                if success:
+                    return save_path
+
+            self.display = None
+
+        return None
+
+    async def _capture_frames(self) -> None:
+        """Background task to capture frames for recording."""
+        while self._recording and self.display:
+            try:
+                if self.client.is_connected:
+                    img = await self.client.screenshot()
+                    await self.display.add_frame(img)
+                await asyncio.sleep(1 / 30)  # 30 fps
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(0.1)
+
+
+# Global session
+_session: RDPSession | None = None
+
+
+def get_session() -> RDPSession:
+    """Get the current session, raising an error if not connected."""
+    if _session is None or not _session.is_connected:
+        raise RuntimeError("Not connected to RDP server.")
+    return _session
+
+
+# =============================================================================
+# Programmatic Connection (for direct use without MCP)
+# =============================================================================
+
+
+async def connect(
+    host: str,
+    username: str | None = None,
+    password: str | None = None,
+    domain: str | None = None,
+    port: int = 3389,
+    width: int = 1920,
+    height: int = 1080,
+    record_session: str | None = None,
 ) -> dict[str, str | int | bool]:
     """
-    Connect to a Windows RDP server.
-    
-    Establishes an RDP connection using the provided credentials or environment variables.
-    Environment variables used as fallbacks: RDP_HOST, RDP_USER, RDP_PASS, RDP_DOMAIN.
-    
-    Returns connection status and desktop dimensions.
+    Connect to an RDP server programmatically.
+
+    This is for direct Python usage, not through MCP.
+    For MCP, the connection is established via environment variables on startup.
+
+    Args:
+        host: RDP server hostname or IP.
+        username: Username for authentication.
+        password: Password for authentication.
+        domain: Windows domain (optional).
+        port: RDP port (default: 3389).
+        width: Desktop width in pixels.
+        height: Desktop height in pixels.
+        record_session: Path to save session recording (optional).
+
+    Returns:
+        Connection status and desktop dimensions.
     """
-    global _rdp_client
-    
-    # Use environment variables as fallbacks
-    host = host or os.getenv("RDP_HOST")
-    username = username or os.getenv("RDP_USER")
-    password = password or os.getenv("RDP_PASS")
-    domain = domain or os.getenv("RDP_DOMAIN")
-    
-    if not host:
-        raise ValueError("Host is required. Provide it as parameter or set RDP_HOST environment variable.")
-    
+    global _session
+
     # Disconnect existing connection if any
-    if _rdp_client is not None and _rdp_client.is_connected:
-        await _rdp_client.disconnect()
-    
-    # Create and connect
-    _rdp_client = RDPClient(
+    if _session is not None and _session.is_connected:
+        await _session.client.disconnect()
+
+    config = RDPConfig(
         host=host,
-        port=port,
         username=username,
         password=password,
         domain=domain,
+        port=port,
         width=width,
         height=height,
+        record_session=record_session,
     )
-    
-    await _rdp_client.connect()
-    
+
+    client = RDPClient(
+        host=config.host,
+        port=config.port,
+        username=config.username,
+        password=config.password,
+        domain=config.domain,
+        width=config.width,
+        height=config.height,
+    )
+
+    await client.connect()
+
+    _session = RDPSession(client=client, config=config)
+
+    # Start recording if requested
+    if record_session:
+        await _session.start_recording()
+
     return {
         "status": "connected",
         "host": host,
-        "width": _rdp_client.width,
-        "height": _rdp_client.height,
+        "width": client.width,
+        "height": client.height,
         "connected": True,
+        "recording": record_session is not None,
     }
 
 
-@mcp.tool(
-    annotations={
-        "title": "Disconnect from RDP Server",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-    }
-)
-async def rdp_disconnect() -> dict[str, str | bool]:
+async def disconnect() -> dict[str, str | bool]:
     """
     Disconnect from the current RDP session.
-    
-    Cleanly closes the RDP connection. Safe to call even if not connected.
+
+    Also stops and saves any active recording.
+
+    Returns:
+        Disconnection status.
     """
-    global _rdp_client
-    
-    if _rdp_client is not None:
-        if _rdp_client.is_connected:
-            await _rdp_client.disconnect()
-        _rdp_client = None
-    
+    global _session
+
+    saved_path = None
+
+    if _session is not None:
+        # Stop recording if active
+        if _session.is_recording and _session.config.record_session:
+            saved_path = await _session.stop_recording(_session.config.record_session)
+
+        # Disconnect
+        if _session.is_connected:
+            await _session.client.disconnect()
+
+        _session = None
+
     return {
         "status": "disconnected",
         "connected": False,
+        "saved_recording": saved_path,
     }
 
 
-@mcp.tool(
-    annotations={
-        "title": "Get Connection Status",
-        "readOnlyHint": True,
-    }
-)
-async def rdp_status() -> dict[str, str | int | bool | None]:
-    """
-    Get the current RDP connection status.
-    
-    Returns whether connected and desktop dimensions if available.
-    """
-    if _rdp_client is None:
-        return {
-            "connected": False,
-            "host": None,
-            "width": None,
-            "height": None,
-        }
-    
-    return {
-        "connected": _rdp_client.is_connected,
-        "host": _rdp_client.host,
-        "width": _rdp_client.width if _rdp_client.is_connected else None,
-        "height": _rdp_client.height if _rdp_client.is_connected else None,
-    }
+# =============================================================================
+# Core Functions (usable without MCP)
+# =============================================================================
 
 
-@mcp.tool(
-    annotations={
-        "title": "Take Screenshot",
-        "readOnlyHint": True,
-    }
-)
-async def rdp_screenshot() -> MCPImage:
+async def screenshot() -> Image.Image:
     """
     Capture a screenshot of the remote desktop.
-    
-    Returns the current screen as an image. Use this to see what's on
-    the remote desktop before and after performing actions.
+
+    Returns:
+        PIL Image of the current screen.
+
+    Raises:
+        RuntimeError: If not connected to RDP server.
     """
-    client = _get_client()
-    img = await client.screenshot()
-    
-    # Convert PIL Image to bytes
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    image_bytes = buffer.getvalue()
-    
-    return MCPImage(data=image_bytes, format="png")
+    session = get_session()
+    return await session.client.screenshot()
 
 
-@mcp.tool(
-    annotations={
-        "title": "Move Mouse",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_mouse_move(
-    x: Annotated[int, Field(description="X coordinate (pixels from left edge)", ge=0)],
-    y: Annotated[int, Field(description="Y coordinate (pixels from top edge)", ge=0)],
-) -> dict[str, str | int]:
+async def mouse_move(x: int, y: int) -> dict[str, str | int]:
     """
     Move the mouse cursor to a specific position.
-    
-    Coordinates are in pixels from the top-left corner of the desktop.
+
+    Args:
+        x: X coordinate (pixels from left edge).
+        y: Y coordinate (pixels from top edge).
+
+    Returns:
+        Action confirmation with coordinates.
     """
-    client = _get_client()
-    await client.mouse_move(x, y)
-    
-    return {
-        "action": "mouse_move",
-        "x": x,
-        "y": y,
-    }
+    session = get_session()
+    await session.client.mouse_move(x, y)
+    return {"action": "mouse_move", "x": x, "y": y}
 
 
-@mcp.tool(
-    annotations={
-        "title": "Mouse Click",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_mouse_click(
-    x: Annotated[int, Field(description="X coordinate for the click", ge=0)],
-    y: Annotated[int, Field(description="Y coordinate for the click", ge=0)],
-    button: Annotated[str, "Mouse button: 'left', 'right', or 'middle'"] = "left",
-    double_click: Annotated[bool, "Whether to perform a double-click"] = False,
+async def mouse_click(
+    x: int,
+    y: int,
+    button: str = "left",
+    double_click: bool = False,
 ) -> dict[str, str | int | bool]:
     """
     Click the mouse at a specific position.
-    
-    Moves to the position and performs a click with the specified button.
-    Use double_click=True for double-clicking (e.g., to open files).
+
+    Args:
+        x: X coordinate for the click.
+        y: Y coordinate for the click.
+        button: Mouse button - "left", "right", or "middle".
+        double_click: Whether to double-click.
+
+    Returns:
+        Action confirmation with coordinates and button.
     """
-    client = _get_client()
-    
-    # Convert button name to number
+    session = get_session()
     button_map = {"left": 1, "right": 2, "middle": 3}
     button_num = button_map.get(button.lower(), 1)
-    
-    await client.mouse_click(x, y, button=button_num, double_click=double_click)
-    
+    await session.client.mouse_click(x, y, button=button_num, double_click=double_click)
     return {
         "action": "double_click" if double_click else "click",
         "x": x,
@@ -252,35 +352,30 @@ async def rdp_mouse_click(
     }
 
 
-@mcp.tool(
-    annotations={
-        "title": "Mouse Drag",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_mouse_drag(
-    start_x: Annotated[int, Field(description="Starting X coordinate", ge=0)],
-    start_y: Annotated[int, Field(description="Starting Y coordinate", ge=0)],
-    end_x: Annotated[int, Field(description="Ending X coordinate", ge=0)],
-    end_y: Annotated[int, Field(description="Ending Y coordinate", ge=0)],
-    button: Annotated[str, "Mouse button to hold: 'left', 'right', or 'middle'"] = "left",
+async def mouse_drag(
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+    button: str = "left",
 ) -> dict[str, str | int]:
     """
     Drag the mouse from one position to another.
-    
-    Useful for:
-    - Dragging files or windows
-    - Selecting text
-    - Drawing in applications
-    - Resizing windows
+
+    Args:
+        start_x: Starting X coordinate.
+        start_y: Starting Y coordinate.
+        end_x: Ending X coordinate.
+        end_y: Ending Y coordinate.
+        button: Mouse button to hold.
+
+    Returns:
+        Action confirmation with coordinates.
     """
-    client = _get_client()
-    
+    session = get_session()
     button_map = {"left": 1, "right": 2, "middle": 3}
     button_num = button_map.get(button.lower(), 1)
-    
-    await client.mouse_drag(start_x, start_y, end_x, end_y, button=button_num)
-    
+    await session.client.mouse_drag(start_x, start_y, end_x, end_y, button=button_num)
     return {
         "action": "drag",
         "start_x": start_x,
@@ -291,194 +386,454 @@ async def rdp_mouse_drag(
     }
 
 
-@mcp.tool(
-    annotations={
-        "title": "Mouse Wheel",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_mouse_wheel(
-    x: Annotated[int, Field(description="X coordinate for the scroll", ge=0)],
-    y: Annotated[int, Field(description="Y coordinate for the scroll", ge=0)],
-    delta: Annotated[int, "Scroll amount: positive=up, negative=down. Each unit is ~3 lines."],
-) -> dict[str, str | int]:
+async def mouse_wheel(x: int, y: int, delta: int) -> dict[str, str | int]:
     """
     Scroll the mouse wheel at a specific position.
-    
-    Positive delta scrolls up, negative scrolls down.
-    A delta of 120 is approximately one notch on a standard mouse wheel.
+
+    Args:
+        x: X coordinate for the scroll.
+        y: Y coordinate for the scroll.
+        delta: Scroll amount (positive=up, negative=down).
+
+    Returns:
+        Action confirmation.
     """
-    client = _get_client()
-    await client.mouse_wheel(x, y, delta)
-    
-    return {
-        "action": "wheel",
-        "x": x,
-        "y": y,
-        "delta": delta,
-    }
+    session = get_session()
+    await session.client.mouse_wheel(x, y, delta)
+    return {"action": "wheel", "x": x, "y": y, "delta": delta}
 
 
-@mcp.tool(
-    annotations={
-        "title": "Type Text",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_type_text(
-    text: Annotated[str, "Text to type. Supports Unicode characters."],
-) -> dict[str, str | int]:
+async def type_text(text: str) -> dict[str, str | int]:
     """
     Type text on the remote desktop.
-    
-    Sends the text as keyboard input. Supports all Unicode characters.
-    For special keys like Enter or Tab, use rdp_send_key() instead.
+
+    Args:
+        text: Text to type (supports Unicode).
+
+    Returns:
+        Action confirmation with text length.
     """
-    client = _get_client()
-    await client.send_text(text)
-    
-    return {
-        "action": "type",
-        "text": text,
-        "length": len(text),
-    }
+    session = get_session()
+    await session.client.send_text(text)
+    return {"action": "type", "text": text, "length": len(text)}
 
 
-@mcp.tool(
-    annotations={
-        "title": "Send Key",
-        "readOnlyHint": False,
-    }
-)
-async def rdp_send_key(
-    key: Annotated[str, """Key to send. Can be:
-- A single character (e.g., 'a', 'A', '1')
-- A key name: 'enter', 'tab', 'escape', 'backspace', 'delete',
-  'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown',
-  'f1'-'f12', 'insert', 'space', 'capslock', 'numlock', 'scrolllock',
-  'printscreen', 'pause', 'win', 'lwin', 'rwin', 'apps', 'menu'
-- A hex scancode (e.g., '0x1C' for Enter)"""],
-    modifiers: Annotated[list[str] | None, "Modifier keys to hold: 'ctrl', 'alt', 'shift', 'win'"] = None,
+# Key name to scancode mapping
+KEY_MAP: dict[str, int] = {
+    "escape": 0x01,
+    "esc": 0x01,
+    "1": 0x02,
+    "2": 0x03,
+    "3": 0x04,
+    "4": 0x05,
+    "5": 0x06,
+    "6": 0x07,
+    "7": 0x08,
+    "8": 0x09,
+    "9": 0x0A,
+    "0": 0x0B,
+    "minus": 0x0C,
+    "equals": 0x0D,
+    "backspace": 0x0E,
+    "bs": 0x0E,
+    "tab": 0x0F,
+    "q": 0x10,
+    "w": 0x11,
+    "e": 0x12,
+    "r": 0x13,
+    "t": 0x14,
+    "y": 0x15,
+    "u": 0x16,
+    "i": 0x17,
+    "o": 0x18,
+    "p": 0x19,
+    "enter": 0x1C,
+    "return": 0x1C,
+    "ctrl": 0x1D,
+    "lctrl": 0x1D,
+    "a": 0x1E,
+    "s": 0x1F,
+    "d": 0x20,
+    "f": 0x21,
+    "g": 0x22,
+    "h": 0x23,
+    "j": 0x24,
+    "k": 0x25,
+    "l": 0x26,
+    "shift": 0x2A,
+    "lshift": 0x2A,
+    "z": 0x2C,
+    "x": 0x2D,
+    "c": 0x2E,
+    "v": 0x2F,
+    "b": 0x30,
+    "n": 0x31,
+    "m": 0x32,
+    "rshift": 0x36,
+    "alt": 0x38,
+    "lalt": 0x38,
+    "space": 0x39,
+    "capslock": 0x3A,
+    "caps": 0x3A,
+    "f1": 0x3B,
+    "f2": 0x3C,
+    "f3": 0x3D,
+    "f4": 0x3E,
+    "f5": 0x3F,
+    "f6": 0x40,
+    "f7": 0x41,
+    "f8": 0x42,
+    "f9": 0x43,
+    "f10": 0x44,
+    "numlock": 0x45,
+    "scrolllock": 0x46,
+    "home": 0x47,
+    "up": 0x48,
+    "pageup": 0x49,
+    "pgup": 0x49,
+    "left": 0x4B,
+    "right": 0x4D,
+    "end": 0x4F,
+    "down": 0x50,
+    "pagedown": 0x51,
+    "pgdn": 0x51,
+    "insert": 0x52,
+    "ins": 0x52,
+    "delete": 0x53,
+    "del": 0x53,
+    "f11": 0x57,
+    "f12": 0x58,
+    "win": 0xE05B,
+    "lwin": 0xE05B,
+    "rwin": 0xE05C,
+    "apps": 0xE05D,
+    "menu": 0xE05D,
+    "rctrl": 0xE01D,
+    "ralt": 0xE038,
+    "printscreen": 0xE037,
+    "prtsc": 0xE037,
+    "pause": 0xE11D,
+}
+
+MODIFIER_MAP: dict[str, int] = {
+    "ctrl": 0x1D,
+    "alt": 0x38,
+    "shift": 0x2A,
+    "win": 0xE05B,
+}
+
+
+async def send_key(
+    key: str,
+    modifiers: list[str] | None = None,
 ) -> dict[str, str | list[str] | None]:
     """
     Send a keyboard key press.
-    
-    For typing regular text, use rdp_type_text() instead.
-    This is for special keys and key combinations like Ctrl+C.
-    
-    Examples:
-    - Send Enter: rdp_send_key("enter")
-    - Copy (Ctrl+C): rdp_send_key("c", modifiers=["ctrl"])
-    - Alt+Tab: rdp_send_key("tab", modifiers=["alt"])
-    - Ctrl+Alt+Delete: rdp_send_key("delete", modifiers=["ctrl", "alt"])
+
+    Args:
+        key: Key to send. Can be a single character, key name, or hex scancode.
+        modifiers: Modifier keys to hold ("ctrl", "alt", "shift", "win").
+
+    Returns:
+        Action confirmation.
     """
-    client = _get_client()
-    
-    # Key name to scancode mapping
-    key_map: dict[str, int] = {
-        "escape": 0x01, "esc": 0x01,
-        "1": 0x02, "2": 0x03, "3": 0x04, "4": 0x05, "5": 0x06,
-        "6": 0x07, "7": 0x08, "8": 0x09, "9": 0x0A, "0": 0x0B,
-        "minus": 0x0C, "equals": 0x0D,
-        "backspace": 0x0E, "bs": 0x0E,
-        "tab": 0x0F,
-        "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14,
-        "y": 0x15, "u": 0x16, "i": 0x17, "o": 0x18, "p": 0x19,
-        "enter": 0x1C, "return": 0x1C,
-        "ctrl": 0x1D, "lctrl": 0x1D,
-        "a": 0x1E, "s": 0x1F, "d": 0x20, "f": 0x21, "g": 0x22,
-        "h": 0x23, "j": 0x24, "k": 0x25, "l": 0x26,
-        "shift": 0x2A, "lshift": 0x2A,
-        "z": 0x2C, "x": 0x2D, "c": 0x2E, "v": 0x2F, "b": 0x30,
-        "n": 0x31, "m": 0x32,
-        "rshift": 0x36,
-        "alt": 0x38, "lalt": 0x38,
-        "space": 0x39,
-        "capslock": 0x3A, "caps": 0x3A,
-        "f1": 0x3B, "f2": 0x3C, "f3": 0x3D, "f4": 0x3E, "f5": 0x3F,
-        "f6": 0x40, "f7": 0x41, "f8": 0x42, "f9": 0x43, "f10": 0x44,
-        "numlock": 0x45,
-        "scrolllock": 0x46,
-        "home": 0x47, "up": 0x48, "pageup": 0x49, "pgup": 0x49,
-        "left": 0x4B, "right": 0x4D,
-        "end": 0x4F, "down": 0x50, "pagedown": 0x51, "pgdn": 0x51,
-        "insert": 0x52, "ins": 0x52,
-        "delete": 0x53, "del": 0x53,
-        "f11": 0x57, "f12": 0x58,
-        "win": 0xE05B, "lwin": 0xE05B, "rwin": 0xE05C,
-        "apps": 0xE05D, "menu": 0xE05D,
-        "rctrl": 0xE01D,
-        "ralt": 0xE038,
-        "printscreen": 0xE037, "prtsc": 0xE037,
-        "pause": 0xE11D,
-    }
-    
-    modifier_map: dict[str, int] = {
-        "ctrl": 0x1D,
-        "alt": 0x38,
-        "shift": 0x2A,
-        "win": 0xE05B,
-    }
-    
-    # Determine the key to send
+    session = get_session()
+    client = session.client
+
     key_lower = key.lower()
-    
+
     if key_lower.startswith("0x"):
-        # Hex scancode
         scancode = int(key_lower, 16)
-    elif key_lower in key_map:
-        scancode = key_map[key_lower]
+    elif key_lower in KEY_MAP:
+        scancode = KEY_MAP[key_lower]
     elif len(key) == 1:
-        # Single character - send as unicode
-        # Press modifiers first
+        # Single character - send as unicode with modifiers
         if modifiers:
             for mod in modifiers:
-                mod_scancode = modifier_map.get(mod.lower())
+                mod_scancode = MODIFIER_MAP.get(mod.lower())
                 if mod_scancode:
                     await client.send_key(mod_scancode, is_press=True, is_release=False)
-        
-        # Send the character
+
         await client.send_key(key, is_press=True, is_release=True)
-        
-        # Release modifiers
+
         if modifiers:
             for mod in reversed(modifiers):
-                mod_scancode = modifier_map.get(mod.lower())
+                mod_scancode = MODIFIER_MAP.get(mod.lower())
                 if mod_scancode:
                     await client.send_key(mod_scancode, is_press=False, is_release=True)
-        
-        return {
-            "action": "key",
-            "key": key,
-            "modifiers": modifiers,
-        }
+
+        return {"action": "key", "key": key, "modifiers": modifiers}
     else:
-        raise ValueError(f"Unknown key: {key}. Use a key name, single character, or hex scancode.")
-    
+        raise ValueError(f"Unknown key: {key}")
+
     # Press modifiers
     if modifiers:
         for mod in modifiers:
-            mod_scancode = modifier_map.get(mod.lower())
+            mod_scancode = MODIFIER_MAP.get(mod.lower())
             if mod_scancode:
                 await client.send_key(mod_scancode, is_press=True, is_release=False)
-    
+
     # Send the key
     await client.send_key(scancode, is_press=True, is_release=True)
-    
+
     # Release modifiers
     if modifiers:
         for mod in reversed(modifiers):
-            mod_scancode = modifier_map.get(mod.lower())
+            mod_scancode = MODIFIER_MAP.get(mod.lower())
             if mod_scancode:
                 await client.send_key(mod_scancode, is_press=False, is_release=True)
-    
+
+    return {"action": "key", "key": key, "modifiers": modifiers}
+
+
+async def status() -> dict[str, str | int | bool | None]:
+    """
+    Get the current RDP connection status.
+
+    Returns:
+        Connection status and desktop dimensions.
+    """
+    if _session is None:
+        return {
+            "connected": False,
+            "host": None,
+            "width": None,
+            "height": None,
+            "recording": False,
+        }
+
     return {
-        "action": "key",
-        "key": key,
-        "modifiers": modifiers,
+        "connected": _session.is_connected,
+        "host": _session.client.host,
+        "width": _session.client.width if _session.is_connected else None,
+        "height": _session.client.height if _session.is_connected else None,
+        "recording": _session.is_recording,
     }
 
 
-# Entry point for running the server directly
-if __name__ == "__main__":
+async def start_recording() -> dict[str, str | bool]:
+    """
+    Start recording the session.
+
+    Returns:
+        Status confirmation.
+    """
+    session = get_session()
+    await session.start_recording()
+    return {"action": "start_recording", "recording": True}
+
+
+async def stop_recording(save_path: str) -> dict[str, str | bool | None]:
+    """
+    Stop recording and save to file.
+
+    Args:
+        save_path: Path to save the recording.
+
+    Returns:
+        Status confirmation with saved path.
+    """
+    session = get_session()
+    saved = await session.stop_recording(save_path)
+    return {
+        "action": "stop_recording",
+        "recording": False,
+        "saved_path": saved,
+    }
+
+
+# =============================================================================
+# MCP Server Setup
+# =============================================================================
+
+
+@asynccontextmanager
+async def lifespan(app: FastMCP) -> AsyncGenerator[None, None]:
+    """Connect to RDP on startup and disconnect on shutdown."""
+    global _session
+
+    # Load config from environment
+    config = RDPConfig.from_env()
+
+    # Create and connect
+    client = RDPClient(
+        host=config.host,
+        port=config.port,
+        username=config.username,
+        password=config.password,
+        domain=config.domain,
+        width=config.width,
+        height=config.height,
+    )
+
+    await client.connect()
+
+    _session = RDPSession(client=client, config=config)
+
+    # Start recording if configured
+    if config.record_session:
+        await _session.start_recording()
+
+    try:
+        yield
+    finally:
+        # Stop recording and save if configured
+        if _session and _session.is_recording and config.record_session:
+            await _session.stop_recording(config.record_session)
+
+        # Disconnect
+        if _session and _session.is_connected:
+            await _session.client.disconnect()
+
+        _session = None
+
+
+# Create the MCP server with lifespan
+mcp = FastMCP(
+    name="Simple RDP",
+    instructions="""
+    This MCP server is connected to a Windows desktop via RDP.
+    
+    The connection was established on startup using environment variables.
+    You can interact with the desktop using these tools:
+    
+    - rdp_screenshot: See the current screen
+    - rdp_mouse_move/click/drag/wheel: Mouse operations
+    - rdp_type_text: Type text
+    - rdp_send_key: Send special keys and key combinations
+    - rdp_status: Check connection status
+    - rdp_start_recording/stop_recording: Record session to video
+    
+    Typical workflow:
+    1. Take a screenshot to see the current state
+    2. Interact using mouse and keyboard
+    3. Take screenshots to verify your actions
+    """,
+    lifespan=lifespan,
+)
+
+
+# =============================================================================
+# MCP Tool Wrappers (thin wrappers around core functions)
+# =============================================================================
+
+
+@mcp.tool(annotations={"title": "Take Screenshot", "readOnlyHint": True})
+async def rdp_screenshot() -> MCPImage:
+    """
+    Capture a screenshot of the remote desktop.
+
+    Returns the current screen as an image.
+    """
+    img = await screenshot()
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return MCPImage(data=buffer.getvalue(), format="png")
+
+
+@mcp.tool(annotations={"title": "Get Status", "readOnlyHint": True})
+async def rdp_status() -> dict[str, str | int | bool | None]:
+    """Get the current RDP connection status."""
+    return await status()
+
+
+@mcp.tool(annotations={"title": "Move Mouse", "readOnlyHint": False})
+async def rdp_mouse_move(
+    x: Annotated[int, Field(description="X coordinate (pixels from left)", ge=0)],
+    y: Annotated[int, Field(description="Y coordinate (pixels from top)", ge=0)],
+) -> dict[str, str | int]:
+    """Move the mouse cursor to a specific position."""
+    return await mouse_move(x, y)
+
+
+@mcp.tool(annotations={"title": "Mouse Click", "readOnlyHint": False})
+async def rdp_mouse_click(
+    x: Annotated[int, Field(description="X coordinate", ge=0)],
+    y: Annotated[int, Field(description="Y coordinate", ge=0)],
+    button: Annotated[str, "Mouse button: 'left', 'right', or 'middle'"] = "left",
+    double_click: Annotated[bool, "Whether to double-click"] = False,
+) -> dict[str, str | int | bool]:
+    """Click the mouse at a specific position."""
+    return await mouse_click(x, y, button, double_click)
+
+
+@mcp.tool(annotations={"title": "Mouse Drag", "readOnlyHint": False})
+async def rdp_mouse_drag(
+    start_x: Annotated[int, Field(description="Starting X coordinate", ge=0)],
+    start_y: Annotated[int, Field(description="Starting Y coordinate", ge=0)],
+    end_x: Annotated[int, Field(description="Ending X coordinate", ge=0)],
+    end_y: Annotated[int, Field(description="Ending Y coordinate", ge=0)],
+    button: Annotated[str, "Mouse button to hold"] = "left",
+) -> dict[str, str | int]:
+    """Drag the mouse from one position to another."""
+    return await mouse_drag(start_x, start_y, end_x, end_y, button)
+
+
+@mcp.tool(annotations={"title": "Mouse Wheel", "readOnlyHint": False})
+async def rdp_mouse_wheel(
+    x: Annotated[int, Field(description="X coordinate", ge=0)],
+    y: Annotated[int, Field(description="Y coordinate", ge=0)],
+    delta: Annotated[int, "Scroll amount (positive=up, negative=down)"],
+) -> dict[str, str | int]:
+    """Scroll the mouse wheel at a specific position."""
+    return await mouse_wheel(x, y, delta)
+
+
+@mcp.tool(annotations={"title": "Type Text", "readOnlyHint": False})
+async def rdp_type_text(
+    text: Annotated[str, "Text to type (supports Unicode)"],
+) -> dict[str, str | int]:
+    """Type text on the remote desktop."""
+    return await type_text(text)
+
+
+@mcp.tool(annotations={"title": "Send Key", "readOnlyHint": False})
+async def rdp_send_key(
+    key: Annotated[
+        str,
+        """Key to send. Can be:
+- A single character (e.g., 'a', 'A', '1')
+- A key name: 'enter', 'tab', 'escape', 'backspace', 'delete',
+  'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown',
+  'f1'-'f12', 'insert', 'space', 'capslock', 'numlock'
+- A hex scancode (e.g., '0x1C' for Enter)""",
+    ],
+    modifiers: Annotated[list[str] | None, "Modifier keys: 'ctrl', 'alt', 'shift', 'win'"] = None,
+) -> dict[str, str | list[str] | None]:
+    """
+    Send a keyboard key press.
+
+    Examples:
+    - Send Enter: rdp_send_key("enter")
+    - Copy: rdp_send_key("c", modifiers=["ctrl"])
+    - Alt+Tab: rdp_send_key("tab", modifiers=["alt"])
+    """
+    return await send_key(key, modifiers)
+
+
+@mcp.tool(annotations={"title": "Start Recording", "readOnlyHint": False})
+async def rdp_start_recording() -> dict[str, str | bool]:
+    """Start recording the session to video."""
+    return await start_recording()
+
+
+@mcp.tool(annotations={"title": "Stop Recording", "readOnlyHint": False})
+async def rdp_stop_recording(
+    save_path: Annotated[str, "Path to save the recording (e.g., '/tmp/session.mp4')"],
+) -> dict[str, str | bool | None]:
+    """Stop recording and save to file."""
+    return await stop_recording(save_path)
+
+
+# =============================================================================
+# Entry Points
+# =============================================================================
+
+
+def run_server() -> None:
+    """Run the MCP server (entry point for CLI)."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    run_server()
