@@ -116,3 +116,41 @@ class TestClientContextManager:
         client = RDPClient(host="localhost")
         # Just test that the client can be instantiated
         assert client is not None
+
+
+class TestClientMultipleInstances:
+    """Tests for multiple client instances."""
+
+    def test_multiple_clients_independent(self):
+        """Test multiple clients are independent."""
+        client1 = RDPClient(host="host1", port=3389)
+        client2 = RDPClient(host="host2", port=3390)
+        
+        assert client1.host != client2.host
+        assert client1.port != client2.port
+
+    def test_client_default_values(self):
+        """Test client default values."""
+        client = RDPClient(host="localhost")
+        assert client.width == 1920
+        assert client.height == 1080
+        # Check it starts disconnected
+        assert not client.is_connected
+
+
+class TestClientReaderWriter:
+    """Tests for client reader/writer property access."""
+
+    def test_reader_raises_when_not_connected(self):
+        """Test _reader property raises when not connected."""
+        client = RDPClient(host="localhost")
+        # The _reader property should raise ConnectionError
+        with pytest.raises(ConnectionError, match="Not connected"):
+            _ = client._reader
+
+    def test_writer_raises_when_not_connected(self):
+        """Test _writer property raises when not connected."""
+        client = RDPClient(host="localhost")
+        # The _writer property should raise ConnectionError
+        with pytest.raises(ConnectionError, match="Not connected"):
+            _ = client._writer
