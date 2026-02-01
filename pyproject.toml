@@ -1,35 +1,62 @@
-[tool.poetry]
+[project]
 name = "simple-rdp"
 version = "0.1.0"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
-authors = []
 readme = "README.md"
-license = "MIT"
-packages = [{include = "simple_rdp", from = "src"}]
+license = { text = "MIT" }
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: System :: Networking",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+]
+keywords = ["rdp", "remote-desktop", "automation", "screen-capture"]
+dependencies = [
+    "pyspnego>=0.12.0",
+    "pyasn1>=0.6.2",
+    "pillow>=12.1.0",
+    "asn1crypto>=1.5.1",
+    "python-dotenv>=1.0.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-pyspnego = "^0.12.0"
-pyasn1 = "^0.6.2"
-pillow = "^12.1.0"
-asn1crypto = "^1.5.1"
-python-dotenv = "^1.0.0"
-# rle-fast is a required runtime dependency - installed separately from PyPI
-# once published. During development, built from source in rle-fast/
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.14",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "rich>=14.3.1",
+    "python-docx>=1.2.0",
+]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-ruff = "^0.14.14"
-pre-commit = "^4.5.1"
-pytest-asyncio = "^1.3.0"
-mypy = "^1.19.1"
-rich = "^14.3.1"
-python-docx = "^1.2.0"
-pytest-cov = "^7.0.0"
+[project.urls]
+Homepage = "https://github.com/abi-jey/simple-rdp"
+Repository = "https://github.com/abi-jey/simple-rdp"
+Documentation = "https://github.com/abi-jey/simple-rdp#readme"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# Python source is in src/simple_rdp
+python-source = "src"
+# The Rust module will be installed as simple_rdp._rle
+module-name = "simple_rdp._rle"
+# Include Python files in the wheel
+include = ["src/**/*.py"]
+# Features to activate
+features = ["pyo3/extension-module"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

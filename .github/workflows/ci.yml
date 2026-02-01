@@ -1,0 +1,333 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # =============================================================================
+  # LINT
+  # =============================================================================
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install dev dependencies
+        run: pip install ruff mypy
+      
+      - name: Lint with ruff
+        run: ruff check src/ tests/
+      
+      - name: Format check
+        run: ruff format --check src/ tests/ || true
+
+  lint-rust:
+    name: Lint Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      
+      - name: Check formatting
+        run: cargo fmt -- --check
+      
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+  # =============================================================================
+  # TEST
+  # =============================================================================
+  test:
+    name: Test (${{ matrix.os }} py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install maturin
+        run: pip install maturin
+      
+      - name: Build and install package
+        run: maturin develop --release
+      
+      - name: Verify import
+        run: python -c "from simple_rdp._rle import decompress_rle; print('Rust extension works!')"
+      
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+      
+      - name: Run tests
+        run: pytest tests/ --ignore=tests/e2e -v --cov=src/simple_rdp --cov-report=term-missing
+      
+      - name: Upload coverage (Python 3.12 Ubuntu only)
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 30
+
+  # =============================================================================
+  # TYPE CHECK
+  # =============================================================================
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install maturin
+        run: pip install maturin
+      
+      - name: Build and install package
+        run: maturin develop --release
+      
+      - name: Install dependencies
+        run: pip install mypy pyspnego pyasn1 pillow asn1crypto python-dotenv
+      
+      - name: Run mypy
+        run: mypy src/simple_rdp --ignore-missing-imports
+
+  # =============================================================================
+  # BUILD WHEELS
+  # =============================================================================
+  build-linux:
+    name: Build (Linux ${{ matrix.target }} py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-rust, test, typecheck]
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+          manylinux: auto
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
+          path: dist
+
+  build-windows:
+    name: Build (Windows py${{ matrix.python-version }})
+    runs-on: windows-latest
+    needs: [lint-python, lint-rust, test, typecheck]
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64-py${{ matrix.python-version }}
+          path: dist
+
+  build-macos:
+    name: Build (macOS ${{ matrix.target }} py${{ matrix.python-version }})
+    runs-on: macos-latest
+    needs: [lint-python, lint-rust, test, typecheck]
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist -i ${{ matrix.python-version }}
+          sccache: true
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
+          path: dist
+
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-rust, test, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  # =============================================================================
+  # PUBLISH
+  # =============================================================================
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos, build-sdist]
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish)
+    environment:
+      name: pypi
+      url: https://pypi.org/project/simple-rdp/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      
+      - name: List artifacts
+        run: ls -la dist/
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  # =============================================================================
+  # ALPHA RELEASE (on main branch push)
+  # =============================================================================
+  publish-alpha:
+    name: Publish Alpha
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos, build-sdist]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/simple-rdp/
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install maturin
+        run: pip install maturin toml
+      
+      - name: Generate alpha version
+        id: version
+        run: |
+          import toml
+          import os
+          from datetime import datetime
+          
+          with open('pyproject.toml', 'r') as f:
+              config = toml.load(f)
+          
+          base_version = config['project']['version']
+          timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+          alpha_version = f"{base_version}a{timestamp}"
+          
+          # Update pyproject.toml
+          config['project']['version'] = alpha_version
+          with open('pyproject.toml', 'w') as f:
+              toml.dump(config, f)
+          
+          # Update Cargo.toml
+          with open('Cargo.toml', 'r') as f:
+              cargo = toml.load(f)
+          cargo['package']['version'] = alpha_version
+          with open('Cargo.toml', 'w') as f:
+              toml.dump(cargo, f)
+          
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"version={alpha_version}\n")
+          
+          print(f"Alpha version: {alpha_version}")
+        shell: python
+      
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-all
+          pattern: wheels-*
+          merge-multiple: true
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-all/
+          skip-existing: true
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Alpha v${{ steps.version.outputs.version }}
+          prerelease: true
+          generate_release_notes: true
+          files: dist-all/*

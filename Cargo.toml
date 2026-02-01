@@ -1,0 +1,24 @@
+[package]
+name = "simple-rdp"
+version = "0.1.0"
+edition = "2021"
+description = "A Python RDP client for automation - exposes screen capture and input transmission"
+license = "MIT"
+repository = "https://github.com/abi-jey/simple-rdp"
+homepage = "https://github.com/abi-jey/simple-rdp"
+documentation = "https://github.com/abi-jey/simple-rdp#readme"
+keywords = ["rdp", "rle", "decompression", "bitmap", "automation"]
+categories = ["network-programming", "compression", "graphics"]
+
+[lib]
+name = "_rle"
+crate-type = ["cdylib"]
+path = "rust/src/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
