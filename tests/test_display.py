@@ -244,3 +244,47 @@ class TestDisplayAsync:
         finally:
             if os.path.exists(path):
                 os.unlink(path)
+
+
+class TestDisplayPrintStats:
+    """Tests for Display print_stats method."""
+
+    def test_print_stats(self, capsys) -> None:
+        """Test print_stats outputs to stdout."""
+        display = Display(width=100, height=100)
+        display.print_stats()
+        captured = capsys.readouterr()
+        assert "DISPLAY STATS" in captured.out
+        assert "Raw frames in buffer" in captured.out
+        assert "Frames encoded" in captured.out
+        assert "Video buffer" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_print_stats_after_frames(self, capsys) -> None:
+        """Test print_stats after adding frames."""
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        await display.add_raw_frame(frame_data)
+        await display.add_raw_frame(frame_data)
+        display.print_stats()
+        captured = capsys.readouterr()
+        assert "2" in captured.out  # frames received
+
+
+class TestDisplayMaxFrames:
+    """Tests for Display max frames limit."""
+
+    @pytest.mark.asyncio
+    async def test_max_raw_frames_eviction(self) -> None:
+        """Test that old frames are evicted when max is reached."""
+        display = Display(width=10, height=10, max_raw_frames=5)
+        frame_data = b"\x00" * 300
+        
+        # Add more frames than max
+        for i in range(10):
+            await display.add_raw_frame(frame_data)
+        
+        # Should only have max_raw_frames
+        assert display.raw_frame_count == 5
+        # But total count should be all received
+        assert display.frame_count == 10

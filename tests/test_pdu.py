@@ -477,6 +477,112 @@ class TestParsingFunctions:
         assert result["source_descriptor"] == source_descriptor
         assert result["capabilities"] == []
 
+    def test_parse_demand_active_pdu_with_capabilities(self) -> None:
+        """Test parsing demand active PDU with capabilities."""
+        share_id = 0x12345678
+        source_descriptor = b"RDP"
+        
+        # Build a fake capability
+        cap_type = 1
+        cap_data = b"\x00\x01\x02\x03"
+        cap_len = 4 + len(cap_data)
+        capability = struct.pack("<HH", cap_type, cap_len) + cap_data
+        
+        data = struct.pack("<I", share_id)  # Share ID
+        data += struct.pack("<H", len(source_descriptor))  # Source descriptor length
+        data += struct.pack("<H", len(capability))  # Combined capabilities length
+        data += source_descriptor  # Source descriptor
+        data += struct.pack("<H", 1)  # Number of capability sets
+        data += struct.pack("<H", 0)  # Padding
+        data += capability
+        
+        result = parse_demand_active_pdu(data)
+        assert len(result["capabilities"]) == 1
+        assert result["capabilities"][0]["type"] == cap_type
+
+    def test_parse_bitmap_update_with_rects(self) -> None:
+        """Test parsing bitmap update with valid rectangles."""
+        # Build a bitmap update with one rectangle
+        num_rects = 1
+        data = struct.pack("<H", num_rects)  # Number of rectangles
+        
+        # Add bitmap header (18 bytes)
+        data += struct.pack("<H", 0)  # dest_left
+        data += struct.pack("<H", 0)  # dest_top
+        data += struct.pack("<H", 10)  # dest_right
+        data += struct.pack("<H", 10)  # dest_bottom
+        data += struct.pack("<H", 10)  # width
+        data += struct.pack("<H", 10)  # height
+        data += struct.pack("<H", 24)  # bpp (24-bit)
+        data += struct.pack("<H", 0)  # flags
+        bitmap_data = b"\x00" * 30
+        data += struct.pack("<H", len(bitmap_data))  # length
+        data += bitmap_data
+        
+        result = parse_bitmap_update(data)
+        assert len(result) == 1
+        assert result[0]["width"] == 10
+        assert result[0]["height"] == 10
+        assert result[0]["bpp"] == 24
+
+    def test_parse_bitmap_update_invalid_bpp(self) -> None:
+        """Test parsing bitmap update with invalid bpp stops."""
+        num_rects = 1
+        data = struct.pack("<H", num_rects)
+        
+        # Add bitmap header with invalid bpp
+        data += struct.pack("<H", 0)  # dest_left
+        data += struct.pack("<H", 0)  # dest_top
+        data += struct.pack("<H", 10)  # dest_right
+        data += struct.pack("<H", 10)  # dest_bottom
+        data += struct.pack("<H", 10)  # width
+        data += struct.pack("<H", 10)  # height
+        data += struct.pack("<H", 99)  # bpp (invalid)
+        data += struct.pack("<H", 0)  # flags
+        data += struct.pack("<H", 10)  # length
+        
+        result = parse_bitmap_update(data)
+        assert len(result) == 0
+
+    def test_parse_bitmap_update_zero_dimensions(self) -> None:
+        """Test parsing bitmap update with zero dimensions."""
+        num_rects = 1
+        data = struct.pack("<H", num_rects)
+        
+        # Add bitmap header with zero width
+        data += struct.pack("<H", 0)  # dest_left
+        data += struct.pack("<H", 0)  # dest_top
+        data += struct.pack("<H", 0)  # dest_right
+        data += struct.pack("<H", 0)  # dest_bottom
+        data += struct.pack("<H", 0)  # width = 0 (invalid)
+        data += struct.pack("<H", 10)  # height
+        data += struct.pack("<H", 24)  # bpp
+        data += struct.pack("<H", 0)  # flags
+        data += struct.pack("<H", 0)  # length
+        
+        result = parse_bitmap_update(data)
+        assert len(result) == 0
+
+    def test_parse_bitmap_update_insufficient_data(self) -> None:
+        """Test parsing bitmap update with insufficient data for bitmap."""
+        num_rects = 1
+        data = struct.pack("<H", num_rects)
+        
+        # Add bitmap header that claims more data than available
+        data += struct.pack("<H", 0)  # dest_left
+        data += struct.pack("<H", 0)  # dest_top
+        data += struct.pack("<H", 10)  # dest_right
+        data += struct.pack("<H", 10)  # dest_bottom
+        data += struct.pack("<H", 10)  # width
+        data += struct.pack("<H", 10)  # height
+        data += struct.pack("<H", 24)  # bpp
+        data += struct.pack("<H", 0)  # flags
+        data += struct.pack("<H", 1000)  # length (more than available)
+        data += b"\x00" * 10  # Only 10 bytes of data
+        
+        result = parse_bitmap_update(data)
+        assert len(result) == 0
+
 
 class TestMoreMouseEvents:
     """Additional tests for mouse events."""
