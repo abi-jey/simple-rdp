@@ -49,18 +49,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Build and install rle-fast
-        run: |
-          cd rle-fast
-          pip install maturin
-          maturin build --release
-          pip install --find-links target/wheels rle_fast
-      
       - name: Install poetry
         run: pip install poetry
       
       - name: Install dependencies
         run: poetry install --no-interaction
+      
+      - name: Build and install rle-fast into poetry venv
+        run: |
+          cd rle-fast
+          poetry run pip install maturin
+          poetry run maturin build --release
+          poetry run pip install --find-links target/wheels rle_fast
       
       - name: Run unit tests with coverage
         run: poetry run pytest tests/ --ignore=tests/e2e -v --cov=src/simple_rdp --cov-report=term-missing --cov-report=html --cov-report=xml
