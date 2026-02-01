@@ -154,3 +154,166 @@ class TestClientReaderWriter:
         # The _writer property should raise ConnectionError
         with pytest.raises(ConnectionError, match="Not connected"):
             _ = client._writer
+
+
+class TestClientInternalState:
+    """Tests for client internal state."""
+
+    def test_initial_user_id(self):
+        """Test initial user_id is 0."""
+        client = RDPClient(host="localhost")
+        assert client._user_id == 0
+
+    def test_initial_io_channel_id(self):
+        """Test initial _io_channel_id."""
+        client = RDPClient(host="localhost")
+        assert client._io_channel_id == IO_CHANNEL_ID
+
+    def test_initial_channel_ids_empty(self):
+        """Test initial _channel_ids is empty."""
+        client = RDPClient(host="localhost")
+        assert client._channel_ids == []
+
+    def test_initial_share_id(self):
+        """Test initial _share_id is 0."""
+        client = RDPClient(host="localhost")
+        assert client._share_id == 0
+
+    def test_initial_screen_buffer_none(self):
+        """Test initial _screen_buffer is None."""
+        client = RDPClient(host="localhost")
+        assert client._screen_buffer is None
+
+    def test_initial_fragment_buffer_empty(self):
+        """Test initial fragment buffer is empty."""
+        client = RDPClient(host="localhost")
+        assert len(client._fragment_buffer) == 0
+        assert client._fragment_type == 0
+
+    def test_initial_running_false(self):
+        """Test _running is False initially."""
+        client = RDPClient(host="localhost")
+        assert client._running is False
+
+    def test_initial_receive_task_none(self):
+        """Test _receive_task is None initially."""
+        client = RDPClient(host="localhost")
+        assert client._receive_task is None
+
+
+class TestClientScreenCapture:
+    """Tests for client screen capture methods."""
+
+    @pytest.mark.asyncio
+    async def test_screenshot_returns_blank_when_not_connected(self):
+        """Test screenshot returns blank image when not connected."""
+        client = RDPClient(host="localhost", width=100, height=100)
+        # _screen_buffer is None, should return blank image
+        img = await client.screenshot()
+        assert img.size == (100, 100)
+        # Should be all black
+        assert img.getpixel((0, 0)) == (0, 0, 0)
+
+    @pytest.mark.asyncio
+    async def test_screenshot_with_screen_buffer(self):
+        """Test screenshot with initialized screen buffer."""
+        from PIL import Image
+
+        client = RDPClient(host="localhost", width=100, height=100)
+        # Manually set screen buffer
+        client._screen_buffer = Image.new("RGB", (100, 100), color=(255, 0, 0))
+        
+        img = await client.screenshot()
+        assert img.size == (100, 100)
+        # Should be red
+        assert img.getpixel((50, 50)) == (255, 0, 0)
+        # Should be a copy, not the original
+        assert img is not client._screen_buffer
+
+
+class TestClientColorDepth:
+    """Tests for client color depth settings."""
+
+    def test_default_color_depth(self):
+        """Test default color depth is 32."""
+        client = RDPClient(host="localhost")
+        assert client._color_depth == 32
+
+    def test_custom_color_depth(self):
+        """Test custom color depth."""
+        client = RDPClient(host="localhost", color_depth=24)
+        assert client._color_depth == 24
+
+
+class TestClientWallpaper:
+    """Tests for client wallpaper settings."""
+
+    def test_default_show_wallpaper_false(self):
+        """Test show_wallpaper is False by default."""
+        client = RDPClient(host="localhost")
+        assert client._show_wallpaper is False
+
+    def test_show_wallpaper_true(self):
+        """Test show_wallpaper can be True."""
+        client = RDPClient(host="localhost", show_wallpaper=True)
+        assert client._show_wallpaper is True
+
+
+class TestClientAuth:
+    """Tests for client authentication settings."""
+
+    def test_username_none_by_default(self):
+        """Test username is None by default."""
+        client = RDPClient(host="localhost")
+        assert client._username is None
+
+    def test_password_none_by_default(self):
+        """Test password is None by default."""
+        client = RDPClient(host="localhost")
+        assert client._password is None
+
+    def test_domain_none_by_default(self):
+        """Test domain is None by default."""
+        client = RDPClient(host="localhost")
+        assert client._domain is None
+
+    def test_auth_credentials_set(self):
+        """Test authentication credentials are set correctly."""
+        client = RDPClient(
+            host="localhost",
+            username="testuser",
+            password="testpass",
+            domain="TESTDOMAIN",
+        )
+        assert client._username == "testuser"
+        assert client._password == "testpass"
+        assert client._domain == "TESTDOMAIN"
+
+
+class TestClientDisconnect:
+    """Tests for client disconnect behavior."""
+
+    @pytest.mark.asyncio
+    async def test_disconnect_clears_writers(self):
+        """Test disconnect clears reader/writer."""
+        client = RDPClient(host="localhost")
+        await client.disconnect()
+        assert client._tcp_reader is None
+        assert client._tcp_writer is None
+
+    @pytest.mark.asyncio
+    async def test_disconnect_sets_running_false(self):
+        """Test disconnect sets _running to False."""
+        client = RDPClient(host="localhost")
+        client._running = True  # Simulate running
+        await client.disconnect()
+        assert client._running is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_multiple_times(self):
+        """Test disconnect can be called multiple times safely."""
+        client = RDPClient(host="localhost")
+        await client.disconnect()
+        await client.disconnect()
+        await client.disconnect()
+        assert client.is_connected is False

@@ -288,3 +288,115 @@ class TestDisplayMaxFrames:
         assert display.raw_frame_count == 5
         # But total count should be all received
         assert display.frame_count == 10
+
+
+class TestDisplayEncoding:
+    """Tests for Display encoding functionality."""
+
+    @pytest.mark.asyncio
+    async def test_stop_encoding_when_not_started(self) -> None:
+        """Test stop_encoding when not started."""
+        display = Display(width=10, height=10)
+        # Should not raise
+        await display.stop_encoding()
+        assert display.is_encoding is False
+
+    @pytest.mark.asyncio
+    async def test_save_raw_frames_as_video_no_frames(self) -> None:
+        """Test save_raw_frames_as_video with no frames returns False."""
+        display = Display(width=10, height=10)
+        result = await display.save_raw_frames_as_video("/tmp/test_output.mp4")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_save_video_to_invalid_path(self) -> None:
+        """Test save_video to an invalid path returns False."""
+        display = Display(width=10, height=10)
+        # Try to write to a non-existent directory
+        result = await display.save_video("/nonexistent/dir/test.mp4")
+        assert result is False
+
+
+class TestDisplayStatsDetails:
+    """Tests for Display stats in more detail."""
+
+    @pytest.mark.asyncio
+    async def test_stats_are_copy(self) -> None:
+        """Test that stats returns a copy, not the original dict."""
+        display = Display(width=10, height=10)
+        stats1 = display.stats
+        stats1["frames_received"] = 999
+        stats2 = display.stats
+        assert stats2["frames_received"] == 0
+
+    @pytest.mark.asyncio
+    async def test_frame_lock_exists(self) -> None:
+        """Test that _frame_lock exists and is an asyncio.Lock."""
+        display = Display(width=10, height=10)
+        assert hasattr(display, "_frame_lock")
+        assert isinstance(display._frame_lock, asyncio.Lock)
+
+
+class TestDisplayVideoBuffer:
+    """Tests for Display video buffer management."""
+
+    def test_max_video_buffer_calculation(self) -> None:
+        """Test max video buffer bytes calculation."""
+        display = Display(width=100, height=100, max_video_buffer_mb=10)
+        # 10 MB = 10 * 1024 * 1024 bytes
+        assert display._max_video_buffer_bytes == 10 * 1024 * 1024
+
+    def test_video_queue_exists(self) -> None:
+        """Test video queue is initialized."""
+        display = Display(width=100, height=100)
+        assert display._video_queue is not None
+
+    def test_chunk_sequence_starts_at_zero(self) -> None:
+        """Test chunk sequence counter starts at 0."""
+        display = Display(width=100, height=100)
+        assert display._chunk_sequence == 0
+
+    def test_video_buffer_size_starts_at_zero(self) -> None:
+        """Test video buffer size starts at 0."""
+        display = Display(width=100, height=100)
+        assert display._video_buffer_size == 0
+
+
+class TestScreenBufferEdgeCases:
+    """Edge case tests for ScreenBuffer."""
+
+    def test_empty_data(self) -> None:
+        """Test ScreenBuffer with empty data."""
+        buffer = ScreenBuffer(width=0, height=0, data=b"")
+        assert buffer.size_bytes == 0
+
+    def test_large_data(self) -> None:
+        """Test ScreenBuffer with large data."""
+        # Simulating 1920x1080 RGB frame
+        data = b"\x00" * (1920 * 1080 * 3)
+        buffer = ScreenBuffer(width=1920, height=1080, data=data)
+        assert buffer.size_bytes == 1920 * 1080 * 3
+
+    def test_custom_timestamp(self) -> None:
+        """Test ScreenBuffer with custom timestamp."""
+        buffer = ScreenBuffer(width=10, height=10, data=b"\x00", timestamp=12345.6789)
+        assert buffer.timestamp == 12345.6789
+
+
+class TestVideoChunkEdgeCases:
+    """Edge case tests for VideoChunk."""
+
+    def test_empty_chunk(self) -> None:
+        """Test VideoChunk with empty data."""
+        chunk = VideoChunk(data=b"", timestamp=0.0, sequence=0)
+        assert chunk.size_bytes == 0
+
+    def test_large_sequence(self) -> None:
+        """Test VideoChunk with large sequence number."""
+        chunk = VideoChunk(data=b"\x00", timestamp=1.0, sequence=999999)
+        assert chunk.sequence == 999999
+
+    def test_negative_timestamp(self) -> None:
+        """Test VideoChunk with negative timestamp."""
+        chunk = VideoChunk(data=b"\x00", timestamp=-1.0, sequence=0)
+        assert chunk.timestamp == -1.0
