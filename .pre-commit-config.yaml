@@ -12,7 +12,7 @@ repos:
   - id: mypy
     additional_dependencies: [rich, pyspnego, cryptography]
     args: [--config-file=pyproject.toml]
-    exclude: ^(tests/|examples/)
+    exclude: ^(tests/|examples/|src/simple_rdp_mcp/)
 
 - repo: local
   hooks:

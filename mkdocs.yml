@@ -78,6 +78,7 @@ nav:
       - Mouse Input: guide/mouse-input.md
       - Keyboard Input: guide/keyboard-input.md
       - Pointer/Cursor: guide/pointer.md
+      - MCP Server: guide/mcp-server.md
   - Examples:
       - Browser Viewer: examples/browser-viewer.md
       - Automation Scripts: examples/automation.md
