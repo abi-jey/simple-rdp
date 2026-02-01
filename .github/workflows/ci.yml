@@ -17,7 +17,7 @@ on:
 
 jobs:
   # =============================================================================
-  # LINT (using pre-commit)
+  # LINT (using pre-commit - includes ruff, mypy, cargo fmt, clippy)
   # =============================================================================
   lint:
     name: Lint (pre-commit)
@@ -38,40 +38,12 @@ jobs:
         run: pre-commit run --all-files
 
   # =============================================================================
-  # TYPE CHECK
-  # =============================================================================
-  typecheck:
-    name: Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-      
-      - name: Build package
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release
-      
-      - name: Install wheel
-        run: pip install target/wheels/*.whl
-      
-      - name: Install dependencies
-        run: pip install mypy pyspnego pyasn1 pillow asn1crypto python-dotenv
-      
-      - name: Run mypy
-        run: mypy src/simple_rdp --ignore-missing-imports
-
-  # =============================================================================
   # TEST
   # =============================================================================
   test:
     name: Test (${{ matrix.os }} py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    needs: [lint, typecheck]
+    needs: [lint]
     strategy:
       fail-fast: false
       matrix:
