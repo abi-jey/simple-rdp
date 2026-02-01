@@ -473,3 +473,46 @@ class TestMcsSendDataRequestLengths:
                 channel_id=1003,
                 user_data=user_data,
             )
+
+    def test_build_mcs_send_data_request_custom_priority(self) -> None:
+        """Test building MCS send data request with custom priority."""
+        result = build_mcs_send_data_request(
+            user_id=1001,
+            channel_id=1003,
+            data_priority=2,
+            user_data=b"\x00" * 10,
+        )
+        assert isinstance(result, bytes)
+        # Data priority should be in lower 2 bits
+        assert (result[0] & 0x03) == 2
+
+    def test_build_mcs_send_data_request_empty_data(self) -> None:
+        """Test building MCS send data request with empty data."""
+        result = build_mcs_send_data_request(
+            user_id=1001,
+            channel_id=1003,
+            user_data=b"",
+        )
+        assert isinstance(result, bytes)
+        # Should still have header bytes
+        assert len(result) >= 6
+
+
+class TestMcsErectDomainRequest:
+    """Tests for MCS Erect Domain Request building."""
+
+    def test_build_mcs_erect_domain_request_custom_values(self) -> None:
+        """Test building erect domain request with custom values."""
+        result = build_mcs_erect_domain_request(sub_height=5, sub_interval=10)
+        assert len(result) > 0
+        assert result[0] == MCS_TYPE_ERECT_DOMAIN_REQUEST
+
+
+class TestMcsChannelJoinRequest:
+    """Tests for MCS Channel Join Request building."""
+
+    def test_build_mcs_channel_join_request_various_channels(self) -> None:
+        """Test building channel join request for various channels."""
+        for channel_id in [1003, 1004, 1005, 1006]:
+            result = build_mcs_channel_join_request(user_id=1001, channel_id=channel_id)
+            assert result[0] == MCS_TYPE_CHANNEL_JOIN_REQUEST

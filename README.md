@@ -1,5 +1,8 @@
 # Simple RDP
 
+[![CI](https://github.com/abi-jey/simple-rdp/actions/workflows/ci.yml/badge.svg)](https://github.com/abi-jey/simple-rdp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/abi-jey/simple-rdp/branch/main/graph/badge.svg)](https://codecov.io/gh/abi-jey/simple-rdp)
+
 A Python RDP client library designed for automation purposes. Unlike traditional RDP clients, Simple RDP does not provide an interactive session. Instead, it exposes screen capture and input transmission capabilities for building automation workflows.
 
 > [!CAUTION]
