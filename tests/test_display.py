@@ -169,3 +169,78 @@ class TestDisplayAsync:
         display = Display(width=10, height=10)
         chunk = await display.get_next_video_chunk(timeout=0.1)
         assert chunk is None
+
+    @pytest.mark.asyncio
+    async def test_get_frames_all(self) -> None:
+        """Test get_frames returns all frames."""
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        for _ in range(3):
+            await display.add_raw_frame(frame_data)
+        frames = display.get_frames()
+        assert len(frames) == 3
+
+    @pytest.mark.asyncio
+    async def test_get_frames_with_count(self) -> None:
+        """Test get_frames with count parameter."""
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        for _ in range(5):
+            await display.add_raw_frame(frame_data)
+        frames = display.get_frames(count=2)
+        assert len(frames) == 2
+
+    @pytest.mark.asyncio
+    async def test_clear_raw_frames_after_add(self) -> None:
+        """Test clearing raw frames after adding some."""
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        await display.add_raw_frame(frame_data)
+        await display.add_raw_frame(frame_data)
+        assert display.raw_frame_count == 2
+        display.clear_raw_frames()
+        assert display.raw_frame_count == 0
+
+    @pytest.mark.asyncio
+    async def test_add_frame_from_image(self) -> None:
+        """Test adding frame from PIL Image."""
+        from PIL import Image
+        
+        display = Display(width=10, height=10)
+        img = Image.new("RGB", (10, 10), color="red")
+        await display.add_frame(img)
+        assert display.frame_count == 1
+        assert display.raw_frame_count == 1
+
+    @pytest.mark.asyncio
+    async def test_add_frame_converts_rgba_to_rgb(self) -> None:
+        """Test adding RGBA image converts to RGB."""
+        from PIL import Image
+        
+        display = Display(width=10, height=10)
+        img = Image.new("RGBA", (10, 10), color=(255, 0, 0, 128))
+        await display.add_frame(img)
+        assert display.frame_count == 1
+        # Frame should be stored as RGB
+        frame = display.get_latest_frame()
+        assert frame is not None
+        assert frame.format == "RGB"
+
+    @pytest.mark.asyncio
+    async def test_save_video_empty(self) -> None:
+        """Test saving video with no chunks."""
+        import tempfile
+        import os
+        
+        display = Display(width=10, height=10)
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            path = f.name
+        
+        try:
+            result = await display.save_video(path)
+            assert result is True
+            # File should exist but be empty
+            assert os.path.exists(path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)

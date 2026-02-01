@@ -378,21 +378,98 @@ class TestMcsParsingFunctions:
 
     def test_parse_mcs_attach_user_confirm_valid(self) -> None:
         """Test parsing valid attach user confirm."""
-        # Build a minimal valid attach user confirm
-        # Type: 0x2E (ATTACH_USER_CONFIRM), result: 0 (success), user_id: 1001
-        data = bytes([0x2E, 0x00, 0x03, 0xE9])  # Type, result, user_id (big endian)
+        # Build a valid attach user confirm
+        # Byte 0: bits 7-2 = choice (11 for attachUserConfirm), bit 1 = initiator present (1)
+        # So (11 << 2) | 0x02 = 0x2E
+        # Byte 1: result value (0 = success)
+        # Bytes 2-3: user_id - 1001 (big-endian)
+        data = bytes([0x2E, 0x00, 0x00, 0x00])  # Type, result, user_id offset = 0
         result = parse_mcs_attach_user_confirm(data)
-        assert "result" in result or "user_id" in result
+        assert "result" in result
+        assert result["result"] == 0
+
+    def test_parse_mcs_attach_user_confirm_with_user_id(self) -> None:
+        """Test parsing attach user confirm with user ID."""
+        # User ID present, user_id = 1005 => offset = 4
+        data = bytes([0x2E, 0x00, 0x00, 0x04])
+        result = parse_mcs_attach_user_confirm(data)
+        assert result["user_id"] == 1005
+
+    def test_parse_mcs_attach_user_confirm_too_short(self) -> None:
+        """Test parsing attach user confirm with too short data."""
+        with pytest.raises(ValueError, match="too short"):
+            parse_mcs_attach_user_confirm(b"\x2E")
 
     def test_parse_mcs_channel_join_confirm_valid(self) -> None:
         """Test parsing valid channel join confirm."""
         # Type: 0x3E (CHANNEL_JOIN_CONFIRM), result: 0, initiator: 1001, channel: 1003
+        # Byte 0: (15 << 2) | 0x02 = 0x3E (type + channel present)
         data = bytes([
-            0x3E,  # Type
+            0x3E,  # Type + channel present
             0x00,  # Result (success)
-            0x03, 0xE9,  # Initiator (1001)
+            0x00, 0x00,  # Initiator offset (0 => 1001)
             0x03, 0xEB,  # Requested channel (1003)
             0x03, 0xEB,  # Joined channel (1003)
         ])
         result = parse_mcs_channel_join_confirm(data)
         assert isinstance(result, dict)
+        assert result["result"] == 0
+        assert result["user_id"] == 1001
+        assert result["channel_id"] == 1003
+
+    def test_parse_mcs_channel_join_confirm_too_short(self) -> None:
+        """Test parsing channel join confirm with too short data."""
+        with pytest.raises(ValueError, match="too short"):
+            parse_mcs_channel_join_confirm(bytes([0x3E, 0x00, 0x00, 0x00, 0x03]))
+
+    def test_parse_mcs_channel_join_confirm_wrong_type(self) -> None:
+        """Test parsing channel join confirm with wrong type."""
+        # Type byte doesn't match expected
+        data = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        with pytest.raises(ValueError, match="Expected Channel Join Confirm"):
+            parse_mcs_channel_join_confirm(data)
+
+
+class TestMcsSendDataRequestLengths:
+    """Tests for MCS Send Data Request with different lengths."""
+
+    def test_build_mcs_send_data_request_short_data(self) -> None:
+        """Test building MCS send data request with short data."""
+        user_data = b"\x00" * 50
+        result = build_mcs_send_data_request(
+            user_id=1001,
+            channel_id=1003,
+            user_data=user_data,
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > len(user_data)
+
+    def test_build_mcs_send_data_request_medium_data(self) -> None:
+        """Test building MCS send data request with medium-length data."""
+        user_data = b"\x00" * 200
+        result = build_mcs_send_data_request(
+            user_id=1001,
+            channel_id=1003,
+            user_data=user_data,
+        )
+        assert isinstance(result, bytes)
+
+    def test_build_mcs_send_data_request_large_data(self) -> None:
+        """Test building MCS send data request with large data."""
+        user_data = b"\x00" * 5000
+        result = build_mcs_send_data_request(
+            user_id=1001,
+            channel_id=1003,
+            user_data=user_data,
+        )
+        assert isinstance(result, bytes)
+
+    def test_build_mcs_send_data_request_too_large(self) -> None:
+        """Test building MCS send data request with too large data."""
+        user_data = b"\x00" * 20000  # > 16383 bytes
+        with pytest.raises(ValueError, match="too large"):
+            build_mcs_send_data_request(
+                user_id=1001,
+                channel_id=1003,
+                user_data=user_data,
+            )
