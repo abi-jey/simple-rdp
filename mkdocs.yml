@@ -33,11 +33,15 @@ theme:
     - search.highlight
     - content.code.copy
     - content.code.annotate
+    - content.tooltips
+    - content.footnote.tooltips
   icon:
     repo: fontawesome/brands/github
 
 markdown_extensions:
+  - abbr
   - admonition
+  - def_list
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -45,9 +49,13 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      auto_append:
+        - docs/includes/abbreviations.md
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - tables
   - toc:
       permalink: true

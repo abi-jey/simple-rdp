@@ -1,3 +1,7 @@
+---
+icon: material/mouse
+---
+
 # Mouse Input
 
 Simple RDP provides comprehensive mouse input capabilities for automation.
@@ -61,6 +65,13 @@ await client.mouse_button_up(500, 300, button="left")
 ```
 
 Button names: `"left"`, `"right"`, `"middle"` (or numbers 1, 2, 3)
+
+!!! tip "When to use separate events"
+    Use `mouse_button_down` and `mouse_button_up` for:
+    
+    - Custom drag operations
+    - Holding buttons while moving
+    - Games requiring held inputs
 
 ## Dragging
 
@@ -144,10 +155,11 @@ asyncio.run(automation_example())
 
 ## Coordinate System
 
-- Origin (0, 0) is the top-left corner of the screen
-- X increases to the right
-- Y increases downward
-- Coordinates must be within the screen bounds (0 to width-1, 0 to height-1)
+!!! info "Screen Coordinates"
+    - Origin (0, 0) is the **top-left** corner of the screen
+    - X increases to the right
+    - Y increases downward
+    - Coordinates must be within bounds: `0` to `width-1`, `0` to `height-1`
 
 ```
 (0,0) ──────────────────► X (width)
@@ -161,17 +173,20 @@ asyncio.run(automation_example())
 
 ## Tips for Reliable Automation
 
-1. **Add delays after actions** - UI elements need time to respond
-
+!!! warning "Add delays after actions"
+    UI elements need time to respond:
+    
     ```python
     await client.mouse_click(500, 300)
     await asyncio.sleep(0.3)  # Wait for UI response
     ```
 
-2. **Use screenshots to verify** - Capture screens before/after actions
+!!! tip "Use screenshots to verify"
+    Capture screens before/after actions to debug automation issues.
 
-3. **Handle different resolutions** - Calculate positions relative to screen size
-
+!!! tip "Handle different resolutions"
+    Calculate positions relative to screen size:
+    
     ```python
     center_x = client.width // 2
     center_y = client.height // 2

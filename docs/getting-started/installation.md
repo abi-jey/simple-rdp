@@ -2,41 +2,54 @@
 
 ## Requirements
 
-- Python 3.11 or higher
-- Windows RDP server with Network Level Authentication (NLA) enabled
+!!! info "System Requirements"
+    - **Python 3.11** or higher
+    - **Windows RDP server** with Network Level Authentication (NLA) enabled
 
 ## Install with pip
 
-```bash
-pip install simple-rdp
-```
+=== ":material-package: From PyPI (Recommended)"
 
-This installs Simple RDP with the native Rust extension for high-performance RLE bitmap decompression, providing up to 100x faster screenshot performance.
+    ```bash
+    pip install simple-rdp
+    ```
+
+    This installs Simple RDP with the native Rust extension for high-performance RLE bitmap decompression, providing up to 100x faster screenshot performance.
+
+=== ":material-flask: With pipx (Isolated)"
+
+    ```bash
+    pipx install simple-rdp
+    ```
+
+    Use pipx for a globally available, isolated installation.
 
 ## Install from source
 
-Building from source requires the Rust toolchain.
+??? abstract "Building from source"
 
-### Prerequisites
+    Building from source requires the Rust toolchain.
 
-1. Install Rust from [rustup.rs](https://rustup.rs/)
-2. Install maturin: `pip install maturin`
+    ### Prerequisites
 
-### Using maturin (recommended)
+    1. Install Rust from [rustup.rs](https://rustup.rs/)
+    2. Install maturin: `pip install maturin`
 
-```bash
-git clone https://github.com/abi-jey/simple-rdp.git
-cd simple-rdp
-maturin develop --release
-```
+    ### Using maturin (recommended)
 
-### Using pip with build
+    ```bash
+    git clone https://github.com/abi-jey/simple-rdp.git
+    cd simple-rdp
+    maturin develop --release
+    ```
 
-```bash
-git clone https://github.com/abi-jey/simple-rdp.git
-cd simple-rdp
-pip install -e .
-```
+    ### Using pip with build
+
+    ```bash
+    git clone https://github.com/abi-jey/simple-rdp.git
+    cd simple-rdp
+    pip install -e .
+    ```
 
 ## Verify Installation
 
@@ -45,29 +58,41 @@ import simple_rdp
 print(simple_rdp.__version__)
 
 # Verify Rust extension is loaded
-from simple_rdp._rle import decompress_rle
+from simple_rdp._rle import decompress_rle  # (1)!
 print("Rust extension loaded successfully")
 ```
 
+1.  :material-check: If this import succeeds, you have the high-performance Rust backend
+
 ## Performance
 
-The native Rust extension provides significant performance improvements:
+!!! success "Rust Acceleration Included"
+    The native Rust extension is included by default and provides significant performance improvements.
 
 | Metric | Performance |
-|--------|-------------|
+|--------|:-----------:|
 | Screenshot FPS | ~30 FPS |
 | Event Loop Usage | ~10% |
-| RLE Decompression | 100x faster than pure Python |
+| RLE Decompression | 100x faster |
 
 ## Dependencies
 
 Simple RDP depends on the following packages (automatically installed):
 
-- `pyspnego` - NTLM/Kerberos authentication
-- `pyasn1` - ASN.1 encoding/decoding
-- `pillow` - Image processing
-- `asn1crypto` - Additional ASN.1 support
-- `python-dotenv` - Environment variable loading
+`pyspnego`
+:   NTLM/Kerberos authentication
+
+`pyasn1`
+:   ASN.1 encoding/decoding
+
+`pillow`
+:   Image processing
+
+`asn1crypto`
+:   Additional ASN.1 support
+
+`python-dotenv`
+:   Environment variable loading
 
 ## Optional: MCP Server
 
@@ -77,4 +102,6 @@ To use Simple RDP with AI agents via the Model Context Protocol:
 pip install simple-rdp[mcp]
 ```
 
-See the [MCP Server guide](../guide/mcp-server.md) for usage details.
+!!! tip "MCP Integration"
+    The MCP server allows LLM agents like Claude to interact with remote Windows desktops.
+    See the [MCP Server guide](../guide/mcp-server.md) for usage details.

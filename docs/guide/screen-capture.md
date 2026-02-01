@@ -19,13 +19,16 @@ async def main():
         await asyncio.sleep(2)
         
         # Capture as PIL Image
-        img = await client.screenshot()
-        print(f"Size: {img.size}")
+        img = await client.screenshot()  # (1)!
+        print(f"Size: {img.size}")  # (2)!
         print(f"Mode: {img.mode}")  # RGB
 
 
 asyncio.run(main())
 ```
+
+1.  :material-image: Returns a `PIL.Image.Image` in RGB mode
+2.  :material-resize: Size matches the configured `width` and `height`
 
 ## Save Screenshot
 
@@ -57,11 +60,16 @@ async def capture_loop():
             img = await client.screenshot()
             img.save(f"frames/frame_{frame_count:04d}.png")
             frame_count += 1
-            await asyncio.sleep(0.1)  # ~10 FPS
+            await asyncio.sleep(0.1)  # ~10 FPS  # (1)!
 
 
 asyncio.run(capture_loop())
 ```
+
+1.  :material-speedometer: With Rust acceleration, you can achieve up to 30 FPS
+
+!!! tip "Performance"
+    For higher frame rates, use the Rust extension and consider saving frames asynchronously.
 
 ## Screenshot with Cursor
 
@@ -110,52 +118,45 @@ arr = np.array(img)
 
 ## Performance Tips
 
-### 1. Use Rust Acceleration
+!!! success "Rust Acceleration Included"
+    The Rust extension is included by default and provides ~100x faster RLE decompression.
 
-Install the optional Rust extension for ~2x faster screen capture:
+??? tip "Disable Wallpaper"
+    ```python
+    client = RDPClient(
+        ...,
+        show_wallpaper=False,  # Reduces bandwidth
+    )
+    ```
 
-```bash
-maturin develop --release
-```
+??? tip "Lower Color Depth"
+    ```python
+    client = RDPClient(
+        ...,
+        color_depth=16,  # 16-bit color is faster
+    )
+    ```
 
-### 2. Disable Wallpaper
-
-```python
-client = RDPClient(
-    ...,
-    show_wallpaper=False,  # Reduces bandwidth
-)
-```
-
-### 3. Lower Color Depth
-
-```python
-client = RDPClient(
-    ...,
-    color_depth=16,  # 16-bit color is faster
-)
-```
-
-### 4. Appropriate Resolution
-
-Use only the resolution you need:
-
-```python
-client = RDPClient(
-    ...,
-    width=1280,
-    height=720,  # Smaller = faster
-)
-```
+??? tip "Appropriate Resolution"
+    Use only the resolution you need:
+    
+    ```python
+    client = RDPClient(
+        ...,
+        width=1280,
+        height=720,  # Smaller = faster
+    )
+    ```
 
 ## Screen Update Mechanism
 
-Simple RDP maintains an internal screen buffer that is updated incrementally as the RDP server sends bitmap updates. The `screenshot()` method returns a copy of this buffer.
+!!! info "How Screen Capture Works"
+    Simple RDP maintains an internal screen buffer that is updated incrementally as the RDP server sends bitmap updates. The `screenshot()` method returns a copy of this buffer.
 
-The screen buffer is updated in the background by a receive loop that processes:
+    The screen buffer is updated in the background by a receive loop that processes:
 
-- Fast-Path bitmap updates (compressed with RLE)
-- Bitmap update PDUs
-- Pointer updates
+    - :material-lightning-bolt: Fast-Path bitmap updates (compressed with RLE)
+    - :material-image-frame: Bitmap update PDUs
+    - :material-cursor-default: Pointer updates
 
-This means screenshots always reflect the current screen state, not just the initial connection.
+    This means screenshots always reflect the current screen state, not just the initial connection.

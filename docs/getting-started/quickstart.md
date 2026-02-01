@@ -16,9 +16,9 @@ async def main():
         host="192.168.1.100",
         username="your_username",
         password="your_password",
-    ) as client:
+    ) as client:  # (1)!
         # Wait for screen to fully render
-        await asyncio.sleep(2)
+        await asyncio.sleep(2)  # (2)!
         
         # Capture screenshot
         img = await client.screenshot()
@@ -30,6 +30,9 @@ async def main():
 
 asyncio.run(main())
 ```
+
+1.  :material-connection: The context manager handles `connect()` and `disconnect()` automatically
+2.  :material-clock-outline: Give the remote desktop time to render before capturing
 
 ## Connection Parameters
 
@@ -43,72 +46,83 @@ client = RDPClient(
     width=1920,                # Desktop width (default: 1920)
     height=1080,               # Desktop height (default: 1080)
     color_depth=32,            # Color depth: 16, 24, or 32 (default: 32)
-    show_wallpaper=False,      # Disable wallpaper for better performance
+    show_wallpaper=False,      # Disable wallpaper for better performance  # (1)!
 )
 ```
 
+1.  :material-speedometer: Disabling wallpaper significantly improves connection speed and reduces bandwidth
+
+!!! tip "Performance Tip"
+    Setting `show_wallpaper=False` (the default) reduces initial connection time and bandwidth usage.
+
 ## Manual Connection Management
 
-For more control, you can manage the connection manually:
+??? example "For more control, manage the connection manually"
 
-```python
-import asyncio
-from simple_rdp import RDPClient
+    ```python
+    import asyncio
+    from simple_rdp import RDPClient
 
 
-async def main():
-    client = RDPClient(
-        host="192.168.1.100",
-        username="admin",
-        password="secret",
-    )
-    
-    try:
-        await client.connect()
-        print(f"Connected: {client.width}x{client.height}")
+    async def main():
+        client = RDPClient(
+            host="192.168.1.100",
+            username="admin",
+            password="secret",
+        )
         
-        await asyncio.sleep(2)
-        await client.save_screenshot("desktop.png")
-        
-    finally:
-        await client.disconnect()
+        try:
+            await client.connect()
+            print(f"Connected: {client.width}x{client.height}")
+            
+            await asyncio.sleep(2)
+            await client.save_screenshot("desktop.png")
+            
+        finally:
+            await client.disconnect()  # (1)!
 
 
-asyncio.run(main())
-```
+    asyncio.run(main())
+    ```
+
+    1.  :material-alert: Always disconnect in a `finally` block to ensure cleanup
 
 ## Using Environment Variables
 
-For security, store credentials in environment variables:
+!!! warning "Security Best Practice"
+    Never hardcode credentials in your scripts. Use environment variables or a secrets manager.
 
-```bash
-# .env file
-RDP_HOST=192.168.1.100
-RDP_USER=admin
-RDP_PASS=secret
-```
+=== ":material-file-document: .env file"
 
-```python
-import asyncio
-import os
-from dotenv import load_dotenv
-from simple_rdp import RDPClient
+    ```bash
+    RDP_HOST=192.168.1.100
+    RDP_USER=admin
+    RDP_PASS=secret
+    ```
 
-load_dotenv()
+=== ":material-language-python: Python script"
 
+    ```python
+    import asyncio
+    import os
+    from dotenv import load_dotenv
+    from simple_rdp import RDPClient
 
-async def main():
-    async with RDPClient(
-        host=os.environ["RDP_HOST"],
-        username=os.environ["RDP_USER"],
-        password=os.environ["RDP_PASS"],
-    ) as client:
-        await asyncio.sleep(2)
-        await client.save_screenshot("desktop.png")
+    load_dotenv()
 
 
-asyncio.run(main())
-```
+    async def main():
+        async with RDPClient(
+            host=os.environ["RDP_HOST"],
+            username=os.environ["RDP_USER"],
+            password=os.environ["RDP_PASS"],
+        ) as client:
+            await asyncio.sleep(2)
+            await client.save_screenshot("desktop.png")
+
+
+    asyncio.run(main())
+    ```
 
 ## Checking Connection Status
 
@@ -121,6 +135,18 @@ async with RDPClient(...) as client:
 
 ## Next Steps
 
-- [Screen Capture](../guide/screen-capture.md) - Learn about capturing screenshots
-- [Mouse Input](../guide/mouse-input.md) - Send mouse events
-- [Keyboard Input](../guide/keyboard-input.md) - Send keyboard input
+<div class="grid cards" markdown>
+
+-   :material-camera: [**Screen Capture**](../guide/screen-capture.md)
+    
+    Learn about capturing screenshots
+
+-   :material-mouse: [**Mouse Input**](../guide/mouse-input.md)
+    
+    Send mouse events
+
+-   :material-keyboard: [**Keyboard Input**](../guide/keyboard-input.md)
+    
+    Send keyboard input
+
+</div>
