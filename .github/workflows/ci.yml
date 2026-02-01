@@ -86,8 +86,13 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
       
-      - name: Run tests
-        run: pytest tests/ --ignore=tests/e2e -v --cov=src/simple_rdp --cov-report=term-missing
+      - name: Copy tests to temp and run
+        shell: bash
+        run: |
+          # Copy tests to a temp directory so pytest doesn't pick up src/simple_rdp
+          cp -r tests /tmp/tests
+          cd /tmp
+          pytest tests/ --ignore=tests/e2e -v
       
       - name: Upload coverage (Python 3.12 Ubuntu only)
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
