@@ -23,12 +23,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Build rle-fast
+      - name: Build and install rle-fast
         run: |
           cd rle-fast
           pip install maturin
           maturin build --release
-          pip install target/wheels/*.whl
+          pip install --find-links target/wheels rle_fast
       
       - name: Test import
         run: python -c "from rle_fast import decompress_rle; print('✓ rle_fast works')"
@@ -48,18 +48,20 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Build rle-fast
+      - name: Build and install rle-fast
         run: |
           cd rle-fast
           pip install maturin
           maturin build --release
-          pip install target/wheels/*.whl
+          pip install --find-links target/wheels rle_fast
       
       - name: Install poetry
         run: pip install poetry
       
-      - name: Install dependencies
-        run: poetry install --no-interaction
+      - name: Update lock file and install dependencies
+        run: |
+          poetry lock --no-update
+          poetry install --no-interaction
       
       - name: Run unit tests
         run: poetry run pytest tests/ --ignore=tests/e2e -v
@@ -79,18 +81,20 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Build rle-fast
+      - name: Build and install rle-fast
         run: |
           cd rle-fast
           pip install maturin
           maturin build --release
-          pip install target/wheels/*.whl
+          pip install --find-links target/wheels rle_fast
       
       - name: Install poetry
         run: pip install poetry
       
-      - name: Install dependencies
-        run: poetry install --no-interaction
+      - name: Update lock file and install dependencies
+        run: |
+          poetry lock --no-update
+          poetry install --no-interaction
       
       - name: Run mypy
         run: poetry run mypy src/simple_rdp --ignore-missing-imports
