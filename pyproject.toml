@@ -38,11 +38,16 @@ dev = [
     "rich>=14.3.1",
     "python-docx>=1.2.0",
 ]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.26.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/abi-jey/simple-rdp"
 Repository = "https://github.com/abi-jey/simple-rdp"
-Documentation = "https://github.com/abi-jey/simple-rdp#readme"
+Documentation = "https://abi-jey.github.io/simple-rdp/"
 
 [build-system]
 requires = ["maturin>=1.8,<2.0"]
@@ -87,3 +92,9 @@ check_untyped_defs = true
 mypy_path = "src"
 exclude = ["tests/", "agents/"]
 ignore_missing_imports = true
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.6.1"
+mkdocs-material = "^9.7.1"
+mkdocstrings = {extras = ["python"], version = "^1.0.2"}
+

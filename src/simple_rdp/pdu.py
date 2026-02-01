@@ -397,6 +397,7 @@ def build_mouse_event(
     button: int = 0,  # 0=none, 1=left, 2=right, 3=middle
     is_down: bool = False,
     is_move: bool = True,
+    wheel_delta: int = 0,  # Positive=up, negative=down
 ) -> bytes:
     """Build mouse event data."""
     flags = 0
@@ -413,6 +414,15 @@ def build_mouse_event(
 
     if is_down and button > 0:
         flags |= PTRFLAGS_DOWN
+
+    # Handle mouse wheel
+    if wheel_delta != 0:
+        flags |= PTRFLAGS_WHEEL
+        if wheel_delta < 0:
+            flags |= PTRFLAGS_WHEEL_NEGATIVE
+            wheel_delta = -wheel_delta
+        # Wheel delta is in the lower 9 bits (0-511), typically 120 per notch
+        flags |= wheel_delta & 0x01FF
 
     data = bytearray()
     # Pointer flags (2 bytes)

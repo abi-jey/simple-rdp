@@ -130,6 +130,14 @@ class RDPClient:
         self._screen_buffer: Image.Image | None = None
         self._screen_lock = asyncio.Lock()
 
+        # Pointer/cursor state
+        self._pointer_x: int = 0
+        self._pointer_y: int = 0
+        self._pointer_visible: bool = True
+        self._pointer_image: Image.Image | None = None
+        self._pointer_hotspot: tuple[int, int] = (0, 0)
+        self._pointer_cache: dict[int, tuple[Image.Image, tuple[int, int]]] = {}
+
         # Fast-Path fragmentation buffer
         self._fragment_buffer: bytearray = bytearray()
         self._fragment_type: int = 0
@@ -176,6 +184,26 @@ class RDPClient:
     def height(self) -> int:
         """Return the desktop height."""
         return self._height
+
+    @property
+    def pointer_position(self) -> tuple[int, int]:
+        """Return the current pointer position (x, y)."""
+        return (self._pointer_x, self._pointer_y)
+
+    @property
+    def pointer_visible(self) -> bool:
+        """Return whether the pointer is visible."""
+        return self._pointer_visible
+
+    @property
+    def pointer_image(self) -> Image.Image | None:
+        """Return the current pointer image (RGBA)."""
+        return self._pointer_image
+
+    @property
+    def pointer_hotspot(self) -> tuple[int, int]:
+        """Return the pointer hotspot offset (x, y)."""
+        return self._pointer_hotspot
 
     async def connect(self) -> None:
         """
@@ -393,6 +421,57 @@ class RDPClient:
             )
 
         await self._send_input_events(events)
+
+    async def mouse_button_down(self, x: int, y: int, button: int | str = 1) -> None:
+        """
+        Press a mouse button down at a position.
+
+        Args:
+            x: X coordinate.
+            y: Y coordinate.
+            button: Button number (1=left, 2=right, 3=middle) or name ('left', 'right', 'middle').
+        """
+        button_num = self._normalize_button(button)
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        events = [
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=True, is_move=False))
+        ]
+        await self._send_input_events(events)
+
+    async def mouse_button_up(self, x: int, y: int, button: int | str = 1) -> None:
+        """
+        Release a mouse button at a position.
+
+        Args:
+            x: X coordinate.
+            y: Y coordinate.
+            button: Button number (1=left, 2=right, 3=middle) or name ('left', 'right', 'middle').
+        """
+        button_num = self._normalize_button(button)
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        events = [
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=False, is_move=False))
+        ]
+        await self._send_input_events(events)
+
+    async def mouse_wheel(self, x: int, y: int, delta: int) -> None:
+        """
+        Scroll the mouse wheel at a position.
+
+        Args:
+            x: X coordinate.
+            y: Y coordinate.
+            delta: Wheel delta (positive=up, negative=down). Standard is +/-120 per notch.
+        """
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        event_data = build_mouse_event(x, y, button=0, is_move=False, wheel_delta=delta)
+        await self._send_input_events([(event_time, INPUT_EVENT_MOUSE, event_data)])
+
+    def _normalize_button(self, button: int | str) -> int:
+        """Convert button name to number."""
+        if isinstance(button, str):
+            return {"left": 1, "right": 2, "middle": 3}.get(button.lower(), 1)
+        return button
 
     async def mouse_drag(self, x1: int, y1: int, x2: int, y2: int, button: int = 1) -> None:
         """
@@ -960,7 +1039,24 @@ class RDPClient:
             pass  # Skip GDI orders for now
         elif update_code == 0x03:  # FASTPATH_UPDATETYPE_SYNCHRONIZE
             pass  # Synchronize update
-        # Other update types (pointer, palette, etc.) are ignored for now
+        elif update_code == 0x05:  # FASTPATH_UPDATETYPE_PTR_NULL (hidden)
+            self._pointer_visible = False
+            logger.debug("Pointer hidden")
+        elif update_code == 0x06:  # FASTPATH_UPDATETYPE_PTR_DEFAULT
+            self._pointer_visible = True
+            self._pointer_image = None  # Use system default
+            logger.debug("Pointer set to default")
+        elif update_code == 0x08:  # FASTPATH_UPDATETYPE_PTR_POSITION
+            await self._process_pointer_position(update_data)
+        elif update_code == 0x09:  # FASTPATH_UPDATETYPE_COLOR
+            await self._process_color_pointer(update_data)
+        elif update_code == 0x0A:  # FASTPATH_UPDATETYPE_CACHED
+            await self._process_cached_pointer(update_data)
+        elif update_code == 0x0B:  # FASTPATH_UPDATETYPE_POINTER (new pointer)
+            await self._process_new_pointer(update_data)
+        elif update_code == 0x0C:  # FASTPATH_UPDATETYPE_LARGE_POINTER
+            await self._process_new_pointer(update_data, large=True)
+        # Other update types (palette, etc.) are ignored for now
 
     async def _process_fast_path_bitmap(self, data: bytes, compression_flags: int) -> None:
         """Process a Fast-Path bitmap update."""
@@ -974,6 +1070,158 @@ class RDPClient:
         update_type = struct.unpack("<H", data[0:2])[0]
         logger.debug(f"Fast-path bitmap updateType: 0x{update_type:04x}")
         await self._process_bitmap_update(data[2:])
+
+    async def _process_pointer_position(self, data: bytes) -> None:
+        """Process a Pointer Position Update."""
+        if len(data) < 4:
+            return
+        # TS_POINTERPOSATTRIBUTE: position (4 bytes) = xPos (2) + yPos (2)
+        self._pointer_x = struct.unpack("<H", data[0:2])[0]
+        self._pointer_y = struct.unpack("<H", data[2:4])[0]
+        self._pointer_visible = True
+        logger.debug(f"Pointer position: ({self._pointer_x}, {self._pointer_y})")
+
+    async def _process_cached_pointer(self, data: bytes) -> None:
+        """Process a Cached Pointer Update."""
+        if len(data) < 2:
+            return
+        cache_index = struct.unpack("<H", data[0:2])[0]
+        if cache_index in self._pointer_cache:
+            self._pointer_image, self._pointer_hotspot = self._pointer_cache[cache_index]
+            self._pointer_visible = True
+            logger.debug(f"Using cached pointer: index={cache_index}")
+        else:
+            logger.debug(f"Cached pointer not found: index={cache_index}")
+
+    async def _process_color_pointer(self, data: bytes) -> None:
+        """Process a Color Pointer Update (24-bpp)."""
+        await self._parse_pointer_data(data, bpp=24)
+
+    async def _process_new_pointer(self, data: bytes, large: bool = False) -> None:
+        """Process a New Pointer Update (variable bpp)."""
+        if len(data) < 2:
+            return
+        xor_bpp = struct.unpack("<H", data[0:2])[0]
+        await self._parse_pointer_data(data[2:], bpp=xor_bpp)
+
+    async def _parse_pointer_data(self, data: bytes, bpp: int = 24) -> None:
+        """Parse pointer data from Color/New Pointer Update."""
+        if len(data) < 14:
+            return
+
+        offset = 0
+        cache_index = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+
+        # Hotspot: xPos (2) + yPos (2)
+        hotspot_x = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+        hotspot_y = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+
+        width = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+        height = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+
+        length_and_mask = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+        length_xor_mask = struct.unpack("<H", data[offset:offset + 2])[0]
+        offset += 2
+
+        if len(data) < offset + length_xor_mask + length_and_mask:
+            logger.debug(f"Pointer data truncated: need {offset + length_xor_mask + length_and_mask}, have {len(data)}")
+            return
+
+        xor_mask_data = data[offset:offset + length_xor_mask]
+        offset += length_xor_mask
+        and_mask_data = data[offset:offset + length_and_mask]
+
+        # Create pointer image
+        try:
+            pointer_img = self._decode_pointer_image(
+                width, height, bpp, xor_mask_data, and_mask_data
+            )
+            if pointer_img:
+                self._pointer_image = pointer_img
+                self._pointer_hotspot = (hotspot_x, hotspot_y)
+                self._pointer_visible = True
+                self._pointer_cache[cache_index] = (pointer_img, (hotspot_x, hotspot_y))
+                logger.debug(f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}")
+        except Exception as e:
+            logger.debug(f"Failed to decode pointer: {e}")
+
+    def _decode_pointer_image(
+        self, width: int, height: int, bpp: int, xor_data: bytes, and_data: bytes
+    ) -> Image.Image | None:
+        """Decode pointer bitmap data into an RGBA image."""
+        if width == 0 or height == 0:
+            return None
+
+        # Create RGBA image
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        pixels = img.load()
+
+        bytes_per_pixel = bpp // 8
+        # XOR mask is bottom-up, padded to 2-byte boundary per row
+        xor_row_size = ((width * bytes_per_pixel + 1) // 2) * 2
+        # AND mask is 1-bpp, bottom-up, padded to 2-byte boundary per row
+        and_row_size = ((width + 15) // 16) * 2
+
+        for row in range(height):
+            # Bottom-up: first row in data is bottom row of image
+            src_row = height - 1 - row
+
+            for col in range(width):
+                # Get AND mask bit (1 = transparent, 0 = use XOR color)
+                if and_data:
+                    and_byte_idx = src_row * and_row_size + col // 8
+                    and_bit = 7 - (col % 8)
+                    if and_byte_idx < len(and_data):
+                        is_transparent = (and_data[and_byte_idx] >> and_bit) & 1
+                    else:
+                        is_transparent = 1
+                else:
+                    is_transparent = 0
+
+                # Get XOR color
+                xor_offset = src_row * xor_row_size + col * bytes_per_pixel
+                if xor_offset + bytes_per_pixel <= len(xor_data):
+                    if bpp == 32:
+                        b = xor_data[xor_offset]
+                        g = xor_data[xor_offset + 1]
+                        r = xor_data[xor_offset + 2]
+                        a = xor_data[xor_offset + 3] if bytes_per_pixel >= 4 else 255
+                    elif bpp == 24:
+                        b = xor_data[xor_offset]
+                        g = xor_data[xor_offset + 1]
+                        r = xor_data[xor_offset + 2]
+                        a = 255
+                    elif bpp == 16:
+                        pixel = struct.unpack("<H", xor_data[xor_offset:xor_offset + 2])[0]
+                        r = ((pixel >> 10) & 0x1F) << 3
+                        g = ((pixel >> 5) & 0x1F) << 3
+                        b = (pixel & 0x1F) << 3
+                        a = 255
+                    else:
+                        r = g = b = 0
+                        a = 255
+                else:
+                    r = g = b = 0
+                    a = 255
+
+                if is_transparent:
+                    # Check for XOR cursor (inverted colors)
+                    if r != 0 or g != 0 or b != 0:
+                        # XOR cursor - use semi-transparent
+                        pixels[col, row] = (r, g, b, 128)
+                    else:
+                        # Fully transparent
+                        pixels[col, row] = (0, 0, 0, 0)
+                else:
+                    pixels[col, row] = (r, g, b, a if bpp == 32 else 255)
+
+        return img
 
     async def _process_data_pdu(self, data: bytes) -> None:
         """Process a Share Data PDU."""

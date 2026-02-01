@@ -1,0 +1,331 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-card: #0f3460;
+    --accent: #e94560;
+    --accent-light: #ff6b6b;
+    --text-primary: #eee;
+    --text-secondary: #aaa;
+    --success: #4ecca3;
+    --warning: #ffc107;
+    --error: #e94560;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    background: var(--bg-card);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+header h1 {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-radius: 30px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.status.connected {
+    background: rgba(78, 204, 163, 0.2);
+    border: 1px solid var(--success);
+}
+
+.status.disconnected {
+    background: rgba(233, 69, 96, 0.2);
+    border: 1px solid var(--error);
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.connected .status-dot {
+    background: var(--success);
+}
+
+.disconnected .status-dot {
+    background: var(--error);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+main {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.info-panel {
+    display: flex;
+    gap: 30px;
+    padding: 15px 25px;
+    background: var(--bg-card);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.info-panel p {
+    color: var(--text-secondary);
+}
+
+.info-panel span {
+    color: var(--text-primary);
+}
+
+.btn {
+    padding: 10px 20px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    background: var(--accent-light);
+    transform: translateY(-2px);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* Toggle switches */
+.toggle-group {
+    display: flex;
+    gap: 15px;
+    margin-left: auto;
+}
+
+.toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle input {
+    display: none;
+}
+
+.toggle-slider {
+    width: 44px;
+    height: 24px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    position: relative;
+    transition: all 0.3s ease;
+    border: 1px solid var(--text-secondary);
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: var(--text-secondary);
+    border-radius: 50%;
+    top: 2px;
+    left: 2px;
+    transition: all 0.3s ease;
+}
+
+.toggle input:checked + .toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.toggle input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+    background: white;
+}
+
+.toggle-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.toggle input:checked ~ .toggle-label {
+    color: var(--text-primary);
+}
+
+/* Capture mode indicator */
+#viewer-container.mouse-capture {
+    cursor: none;
+}
+
+#viewer-container.keyboard-capture {
+    outline: 2px solid var(--accent);
+}
+
+.capture-indicator {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+}
+
+.capture-badge {
+    padding: 5px 10px;
+    background: rgba(233, 69, 96, 0.9);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: white;
+    display: none;
+}
+
+.capture-badge.active {
+    display: block;
+    animation: pulse 1.5s infinite;
+}
+
+.error-panel {
+    padding: 15px 25px;
+    background: rgba(233, 69, 96, 0.15);
+    border: 1px solid var(--error);
+    border-radius: 12px;
+    color: var(--error);
+}
+
+.error-panel.hidden {
+    display: none;
+}
+
+.error-panel p {
+    margin-bottom: 5px;
+}
+
+.error-panel #error-text {
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-size: 0.9rem;
+    word-break: break-all;
+}
+
+#viewer-container {
+    position: relative;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    min-height: 400px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* Scale to fit viewport */
+    max-height: calc(100vh - 250px);
+}
+
+.loading {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    color: var(--text-secondary);
+}
+
+.loading.hidden {
+    display: none;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid var(--bg-card);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Canvas wrapper for scaling */
+.canvas-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+#screen {
+    max-width: 100%;
+    max-height: calc(100vh - 250px);
+    height: auto;
+    width: auto;
+    display: block;
+    object-fit: contain;
+}
+
+#screen.hidden {
+    display: none;
+}
+
+footer {
+    margin-top: 20px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+    
+    .info-panel {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    header h1 {
+        font-size: 1.4rem;
+    }
+}

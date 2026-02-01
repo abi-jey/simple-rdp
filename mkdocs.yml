@@ -1,0 +1,95 @@
+site_name: Simple RDP
+site_description: A Python RDP client library designed for automation purposes
+site_author: abi-jey
+site_url: https://abi-jey.github.io/simple-rdp/
+repo_name: abi-jey/simple-rdp
+repo_url: https://github.com/abi-jey/simple-rdp
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 2
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
+  - User Guide:
+      - Screen Capture: guide/screen-capture.md
+      - Mouse Input: guide/mouse-input.md
+      - Keyboard Input: guide/keyboard-input.md
+      - Pointer/Cursor: guide/pointer.md
+  - Examples:
+      - Browser Viewer: examples/browser-viewer.md
+      - Automation Scripts: examples/automation.md
+  - API Reference:
+      - RDPClient: api/client.md
+      - Input Types: api/input.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Performance: development/performance.md
+      - Protocol: development/protocol.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/abi-jey/simple-rdp

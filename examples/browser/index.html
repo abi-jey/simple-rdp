@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple RDP Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖥️ Simple RDP Viewer</h1>
+            <div id="status" class="status disconnected">
+                <span class="status-dot"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+        
+        <main>
+            <div id="connection-info" class="info-panel">
+                <p><strong>Host:</strong> <span id="host">-</span></p>
+                <p><strong>Resolution:</strong> <span id="resolution">-</span></p>
+                <p><strong>FPS:</strong> <span id="fps">0</span></p>
+                <div class="toggle-group">
+                    <label class="toggle">
+                        <input type="checkbox" id="mouse-toggle" onchange="window.viewer.toggleMouse(this.checked)">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">🖱️ Mouse</span>
+                    </label>
+                    <label class="toggle">
+                        <input type="checkbox" id="keyboard-toggle" onchange="window.viewer.toggleKeyboard(this.checked)">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">⌨️ Keyboard</span>
+                    </label>
+                </div>
+                <button id="reconnect-btn" class="btn" onclick="window.viewer.reconnect()">🔄 Reconnect</button>
+            </div>
+            
+            <div id="error-panel" class="error-panel hidden">
+                <p><strong>⚠️ Connection Error:</strong></p>
+                <p id="error-text"></p>
+            </div>
+            
+            <div id="viewer-container">
+                <div class="capture-indicator">
+                    <span id="mouse-badge" class="capture-badge">🖱️ Mouse Captured</span>
+                    <span id="keyboard-badge" class="capture-badge">⌨️ Keyboard Captured</span>
+                </div>
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <p id="loading-text">Connecting to RDP server...</p>
+                </div>
+                <div class="canvas-wrapper">
+                    <canvas id="screen" tabindex="0"></canvas>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>Simple RDP - Browser Viewer Example</p>
+        </footer>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
