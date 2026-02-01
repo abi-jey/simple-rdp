@@ -500,6 +500,42 @@ class TestParsingFunctions:
         assert len(result["capabilities"]) == 1
         assert result["capabilities"][0]["type"] == cap_type
 
+    def test_parse_demand_active_pdu_truncated_cap_header(self) -> None:
+        """Test parsing demand active PDU with truncated capability header."""
+        share_id = 0x12345678
+        source_descriptor = b"RDP"
+        
+        data = struct.pack("<I", share_id)  # Share ID
+        data += struct.pack("<H", len(source_descriptor))  # Source descriptor length
+        data += struct.pack("<H", 0)  # Combined capabilities length
+        data += source_descriptor  # Source descriptor
+        data += struct.pack("<H", 1)  # Says 1 capability, but not enough data
+        data += struct.pack("<H", 0)  # Padding
+        # No capability data - should stop gracefully
+        
+        result = parse_demand_active_pdu(data)
+        assert result["capabilities"] == []
+
+    def test_parse_demand_active_pdu_invalid_cap_len(self) -> None:
+        """Test parsing demand active PDU with cap_len < 4."""
+        share_id = 0x12345678
+        source_descriptor = b"RDP"
+        
+        # Build a capability with invalid length (less than 4)
+        capability = struct.pack("<HH", 1, 2)  # cap_type=1, cap_len=2 (invalid)
+        
+        data = struct.pack("<I", share_id)
+        data += struct.pack("<H", len(source_descriptor))
+        data += struct.pack("<H", len(capability))
+        data += source_descriptor
+        data += struct.pack("<H", 1)  # 1 capability
+        data += struct.pack("<H", 0)  # Padding
+        data += capability
+        
+        result = parse_demand_active_pdu(data)
+        # Should stop parsing at invalid cap_len
+        assert result["capabilities"] == []
+
     def test_parse_bitmap_update_with_rects(self) -> None:
         """Test parsing bitmap update with valid rectangles."""
         # Build a bitmap update with one rectangle
@@ -583,6 +619,32 @@ class TestParsingFunctions:
         result = parse_bitmap_update(data)
         assert len(result) == 0
 
+    def test_parse_bitmap_update_truncated_header(self) -> None:
+        """Test parsing bitmap update with truncated header for second rect."""
+        # First rect is valid, second rect header is truncated
+        num_rects = 2
+        data = struct.pack("<H", num_rects)
+        
+        # First rectangle (valid)
+        data += struct.pack("<H", 0)  # dest_left
+        data += struct.pack("<H", 0)  # dest_top
+        data += struct.pack("<H", 10)  # dest_right
+        data += struct.pack("<H", 10)  # dest_bottom
+        data += struct.pack("<H", 10)  # width
+        data += struct.pack("<H", 10)  # height
+        data += struct.pack("<H", 24)  # bpp
+        data += struct.pack("<H", 0)  # flags
+        bitmap_data = b"\x00" * 10
+        data += struct.pack("<H", len(bitmap_data))  # length
+        data += bitmap_data
+        
+        # Second rectangle - only partial header (not enough for 18 bytes)
+        data += struct.pack("<H", 0)  # Only 2 bytes - not enough for header
+        
+        result = parse_bitmap_update(data)
+        # Should have parsed only the first valid rect
+        assert len(result) == 1
+
 
 class TestMoreMouseEvents:
     """Additional tests for mouse events."""
@@ -608,6 +670,45 @@ class TestMoreMouseEvents:
             is_move=False,
         )
         assert isinstance(result, bytes)
+
+    def test_build_mouse_event_button_int_1(self) -> None:
+        """Test building mouse left-click with button=1."""
+        result = build_mouse_event(
+            x=100, y=100, button=1, is_down=True, is_move=False
+        )
+        assert isinstance(result, bytes)
+        # First 2 bytes are flags
+        flags = struct.unpack("<H", result[:2])[0]
+        assert flags & PTRFLAGS_BUTTON1  # Button1 flag set
+        assert flags & PTRFLAGS_DOWN  # Down flag set
+
+    def test_build_mouse_event_button_int_2(self) -> None:
+        """Test building mouse right-click with button=2."""
+        result = build_mouse_event(
+            x=100, y=100, button=2, is_down=True, is_move=False
+        )
+        assert isinstance(result, bytes)
+        flags = struct.unpack("<H", result[:2])[0]
+        assert flags & PTRFLAGS_BUTTON2  # Button2 flag set
+        assert flags & PTRFLAGS_DOWN  # Down flag set
+
+    def test_build_mouse_event_button_int_3(self) -> None:
+        """Test building mouse middle-click with button=3."""
+        result = build_mouse_event(
+            x=100, y=100, button=3, is_down=True, is_move=False
+        )
+        assert isinstance(result, bytes)
+        flags = struct.unpack("<H", result[:2])[0]
+        assert flags & PTRFLAGS_BUTTON3  # Button3 flag set
+        assert flags & PTRFLAGS_DOWN  # Down flag set
+
+    def test_build_mouse_event_no_down_flag_without_button(self) -> None:
+        """Test that PTRFLAGS_DOWN is not set when button=0."""
+        result = build_mouse_event(
+            x=100, y=100, button=0, is_down=True, is_move=True
+        )
+        flags = struct.unpack("<H", result[:2])[0]
+        assert not (flags & PTRFLAGS_DOWN)  # Down should NOT be set
 
 
 class TestMoreConstants:
