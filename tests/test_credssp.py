@@ -318,3 +318,62 @@ class TestCredSSPAuth:
         token = auth.get_initial_token()
         assert isinstance(token, bytes)
         assert len(token) > 0
+
+
+class TestTsRequestWithNonce:
+    """Tests for TSRequest with client nonce."""
+
+    def test_build_ts_request_with_nonce(self) -> None:
+        """Test building TSRequest with client nonce."""
+        pub_key_auth = b"encrypted_pub_key"
+        client_nonce = b"a" * NONCE_SIZE
+        result = build_ts_request_with_pub_key_auth(
+            pub_key_auth=pub_key_auth,
+            client_nonce=client_nonce,
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > len(pub_key_auth) + NONCE_SIZE
+
+    def test_build_ts_request_with_nego_and_nonce(self) -> None:
+        """Test building TSRequest with nego token and nonce."""
+        pub_key_auth = b"encrypted_pub_key"
+        nego_token = b"nego_token_data"
+        client_nonce = b"b" * NONCE_SIZE
+        result = build_ts_request_with_pub_key_auth(
+            pub_key_auth=pub_key_auth,
+            nego_token=nego_token,
+            client_nonce=client_nonce,
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > len(pub_key_auth) + len(nego_token) + NONCE_SIZE
+
+
+class TestAsn1EncodingEdgeCases:
+    """Tests for ASN.1 encoding edge cases."""
+
+    def test_encode_asn1_length_boundary_127(self) -> None:
+        """Test encoding length at boundary of 127."""
+        assert _encode_asn1_length(127) == bytes([127])
+
+    def test_encode_asn1_length_boundary_128(self) -> None:
+        """Test encoding length at boundary of 128."""
+        assert _encode_asn1_length(128) == bytes([0x81, 128])
+
+    def test_encode_asn1_length_boundary_255(self) -> None:
+        """Test encoding length at boundary of 255."""
+        assert _encode_asn1_length(255) == bytes([0x81, 255])
+
+    def test_encode_asn1_length_boundary_256(self) -> None:
+        """Test encoding length at boundary of 256."""
+        assert _encode_asn1_length(256) == bytes([0x82, 0x01, 0x00])
+
+    def test_encode_asn1_context_higher_tag(self) -> None:
+        """Test encoding context with higher tag numbers."""
+        from simple_rdp.credssp import ASN1_CONTEXT_1, ASN1_CONTEXT_2
+        
+        content = b"\x00\x01\x02"
+        result1 = _encode_asn1_context(ASN1_CONTEXT_1, content)
+        assert result1[0] == ASN1_CONTEXT_1
+        
+        result2 = _encode_asn1_context(ASN1_CONTEXT_2, content)
+        assert result2[0] == ASN1_CONTEXT_2
