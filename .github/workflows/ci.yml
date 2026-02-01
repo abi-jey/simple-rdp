@@ -297,24 +297,29 @@ jobs:
           
           base_version = config['project']['version']
           timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-          alpha_version = f"{base_version}a{timestamp}"
           
-          # Update pyproject.toml
-          config['project']['version'] = alpha_version
+          # Use PEP 440 format for Python: 0.1.0a20260201044504
+          python_version = f"{base_version}a{timestamp}"
+          # Use semver format for Cargo: 0.1.0-alpha.20260201044504
+          cargo_version = f"{base_version}-alpha.{timestamp}"
+          
+          # Update pyproject.toml with PEP 440 version
+          config['project']['version'] = python_version
           with open('pyproject.toml', 'w') as f:
               toml.dump(config, f)
           
-          # Update Cargo.toml
+          # Update Cargo.toml with semver version
           with open('Cargo.toml', 'r') as f:
               cargo = toml.load(f)
-          cargo['package']['version'] = alpha_version
+          cargo['package']['version'] = cargo_version
           with open('Cargo.toml', 'w') as f:
               toml.dump(cargo, f)
           
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"version={alpha_version}\n")
+              f.write(f"version={python_version}\n")
           
-          print(f"Alpha version: {alpha_version}")
+          print(f"Python version: {python_version}")
+          print(f"Cargo version: {cargo_version}")
         shell: python
       
       - name: Build wheels
