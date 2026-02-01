@@ -229,8 +229,8 @@ class TestDisplayAsync:
     @pytest.mark.asyncio
     async def test_save_video_empty(self) -> None:
         """Test saving video with no chunks."""
-        import tempfile
         import os
+        import tempfile
         
         display = Display(width=10, height=10)
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -281,7 +281,7 @@ class TestDisplayMaxFrames:
         frame_data = b"\x00" * 300
         
         # Add more frames than max
-        for i in range(10):
+        for _ in range(10):
             await display.add_raw_frame(frame_data)
         
         # Should only have max_raw_frames

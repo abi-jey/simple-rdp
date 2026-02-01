@@ -2,41 +2,37 @@
 
 import struct
 
-import pytest
-
-from simple_rdp.capabilities import (
-    CAPSTYPE_BITMAP,
-    CAPSTYPE_GENERAL,
-    CAPSTYPE_INPUT,
-    CAPSTYPE_ORDER,
-    CAPSTYPE_POINTER,
-    FASTPATH_OUTPUT_SUPPORTED,
-    INPUT_FLAG_FASTPATH_INPUT,
-    INPUT_FLAG_SCANCODES,
-    INPUT_FLAG_UNICODE,
-    LONG_CREDENTIALS_SUPPORTED,
-    OSMAJORTYPE_UNIX,
-    OSMINORTYPE_NATIVE_XSERVER,
-    build_activation_capability,
-    build_bitmap_cache_capability,
-    build_bitmap_capability,
-    build_brush_capability,
-    build_capability_header,
-    build_client_capabilities,
-    build_color_cache_capability,
-    build_control_capability,
-    build_font_capability,
-    build_general_capability,
-    build_glyph_cache_capability,
-    build_input_capability,
-    build_multifragment_update_capability,
-    build_offscreen_cache_capability,
-    build_order_capability,
-    build_pointer_capability,
-    build_share_capability,
-    build_sound_capability,
-    build_virtual_channel_capability,
-)
+from simple_rdp.capabilities import CAPSTYPE_BITMAP
+from simple_rdp.capabilities import CAPSTYPE_GENERAL
+from simple_rdp.capabilities import CAPSTYPE_INPUT
+from simple_rdp.capabilities import CAPSTYPE_ORDER
+from simple_rdp.capabilities import CAPSTYPE_POINTER
+from simple_rdp.capabilities import FASTPATH_OUTPUT_SUPPORTED
+from simple_rdp.capabilities import INPUT_FLAG_FASTPATH_INPUT
+from simple_rdp.capabilities import INPUT_FLAG_SCANCODES
+from simple_rdp.capabilities import INPUT_FLAG_UNICODE
+from simple_rdp.capabilities import LONG_CREDENTIALS_SUPPORTED
+from simple_rdp.capabilities import OSMAJORTYPE_UNIX
+from simple_rdp.capabilities import OSMINORTYPE_NATIVE_XSERVER
+from simple_rdp.capabilities import build_activation_capability
+from simple_rdp.capabilities import build_bitmap_cache_capability
+from simple_rdp.capabilities import build_bitmap_capability
+from simple_rdp.capabilities import build_brush_capability
+from simple_rdp.capabilities import build_capability_header
+from simple_rdp.capabilities import build_client_capabilities
+from simple_rdp.capabilities import build_color_cache_capability
+from simple_rdp.capabilities import build_control_capability
+from simple_rdp.capabilities import build_font_capability
+from simple_rdp.capabilities import build_general_capability
+from simple_rdp.capabilities import build_glyph_cache_capability
+from simple_rdp.capabilities import build_input_capability
+from simple_rdp.capabilities import build_multifragment_update_capability
+from simple_rdp.capabilities import build_offscreen_cache_capability
+from simple_rdp.capabilities import build_order_capability
+from simple_rdp.capabilities import build_pointer_capability
+from simple_rdp.capabilities import build_share_capability
+from simple_rdp.capabilities import build_sound_capability
+from simple_rdp.capabilities import build_virtual_channel_capability
 
 
 class TestCapabilityHeader:

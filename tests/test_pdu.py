@@ -2,65 +2,61 @@
 
 import struct
 
-import pytest
-
-from simple_rdp.pdu import (
-    CTRLACTION_COOPERATE,
-    CTRLACTION_DETACH,
-    CTRLACTION_GRANTED_CONTROL,
-    CTRLACTION_REQUEST_CONTROL,
-    INFO_DISABLECTRLALTDEL,
-    INFO_LOGONNOTIFY,
-    INFO_MOUSE,
-    INFO_UNICODE,
-    INPUT_EVENT_MOUSE,
-    INPUT_EVENT_SCANCODE,
-    INPUT_EVENT_SYNC,
-    INPUT_EVENT_UNICODE,
-    KBDFLAGS_DOWN,
-    KBDFLAGS_EXTENDED,
-    KBDFLAGS_RELEASE,
-    PDUTYPE2_CONTROL,
-    PDUTYPE2_INPUT,
-    PDUTYPE2_SYNCHRONIZE,
-    PDUTYPE2_UPDATE,
-    PDUTYPE_CONFIRMACTIVEPDU,
-    PDUTYPE_DATAPDU,
-    PDUTYPE_DEMANDACTIVEPDU,
-    PERF_DISABLE_CURSOR_SHADOW,
-    PERF_DISABLE_FULLWINDOWDRAG,
-    PERF_DISABLE_MENUANIMATIONS,
-    PERF_DISABLE_THEMING,
-    PERF_DISABLE_WALLPAPER,
-    PTRFLAGS_BUTTON1,
-    PTRFLAGS_BUTTON2,
-    PTRFLAGS_BUTTON3,
-    PTRFLAGS_DOWN,
-    PTRFLAGS_MOVE,
-    SEC_ENCRYPT,
-    SEC_EXCHANGE_PKT,
-    SEC_INFO_PKT,
-    SEC_LICENSE_PKT,
-    UPDATETYPE_BITMAP,
-    UPDATETYPE_ORDERS,
-    build_client_info_pdu,
-    build_confirm_active_pdu,
-    build_control_pdu,
-    build_font_list_pdu,
-    build_input_event_pdu,
-    build_mouse_event,
-    build_refresh_rect_pdu,
-    build_scancode_event,
-    build_security_exchange_pdu,
-    build_share_control_header,
-    build_share_data_header,
-    build_suppress_output_pdu,
-    build_synchronize_pdu,
-    build_unicode_event,
-    parse_bitmap_update,
-    parse_demand_active_pdu,
-    parse_update_pdu,
-)
+from simple_rdp.pdu import CTRLACTION_COOPERATE
+from simple_rdp.pdu import CTRLACTION_DETACH
+from simple_rdp.pdu import CTRLACTION_GRANTED_CONTROL
+from simple_rdp.pdu import CTRLACTION_REQUEST_CONTROL
+from simple_rdp.pdu import INFO_DISABLECTRLALTDEL
+from simple_rdp.pdu import INFO_LOGONNOTIFY
+from simple_rdp.pdu import INFO_MOUSE
+from simple_rdp.pdu import INFO_UNICODE
+from simple_rdp.pdu import INPUT_EVENT_MOUSE
+from simple_rdp.pdu import INPUT_EVENT_SCANCODE
+from simple_rdp.pdu import INPUT_EVENT_SYNC
+from simple_rdp.pdu import INPUT_EVENT_UNICODE
+from simple_rdp.pdu import KBDFLAGS_DOWN
+from simple_rdp.pdu import KBDFLAGS_EXTENDED
+from simple_rdp.pdu import KBDFLAGS_RELEASE
+from simple_rdp.pdu import PDUTYPE2_CONTROL
+from simple_rdp.pdu import PDUTYPE2_INPUT
+from simple_rdp.pdu import PDUTYPE2_SYNCHRONIZE
+from simple_rdp.pdu import PDUTYPE2_UPDATE
+from simple_rdp.pdu import PDUTYPE_CONFIRMACTIVEPDU
+from simple_rdp.pdu import PDUTYPE_DATAPDU
+from simple_rdp.pdu import PDUTYPE_DEMANDACTIVEPDU
+from simple_rdp.pdu import PERF_DISABLE_CURSOR_SHADOW
+from simple_rdp.pdu import PERF_DISABLE_FULLWINDOWDRAG
+from simple_rdp.pdu import PERF_DISABLE_MENUANIMATIONS
+from simple_rdp.pdu import PERF_DISABLE_THEMING
+from simple_rdp.pdu import PERF_DISABLE_WALLPAPER
+from simple_rdp.pdu import PTRFLAGS_BUTTON1
+from simple_rdp.pdu import PTRFLAGS_BUTTON2
+from simple_rdp.pdu import PTRFLAGS_BUTTON3
+from simple_rdp.pdu import PTRFLAGS_DOWN
+from simple_rdp.pdu import PTRFLAGS_MOVE
+from simple_rdp.pdu import SEC_ENCRYPT
+from simple_rdp.pdu import SEC_EXCHANGE_PKT
+from simple_rdp.pdu import SEC_INFO_PKT
+from simple_rdp.pdu import SEC_LICENSE_PKT
+from simple_rdp.pdu import UPDATETYPE_BITMAP
+from simple_rdp.pdu import UPDATETYPE_ORDERS
+from simple_rdp.pdu import build_client_info_pdu
+from simple_rdp.pdu import build_confirm_active_pdu
+from simple_rdp.pdu import build_control_pdu
+from simple_rdp.pdu import build_font_list_pdu
+from simple_rdp.pdu import build_input_event_pdu
+from simple_rdp.pdu import build_mouse_event
+from simple_rdp.pdu import build_refresh_rect_pdu
+from simple_rdp.pdu import build_scancode_event
+from simple_rdp.pdu import build_security_exchange_pdu
+from simple_rdp.pdu import build_share_control_header
+from simple_rdp.pdu import build_share_data_header
+from simple_rdp.pdu import build_suppress_output_pdu
+from simple_rdp.pdu import build_synchronize_pdu
+from simple_rdp.pdu import build_unicode_event
+from simple_rdp.pdu import parse_bitmap_update
+from simple_rdp.pdu import parse_demand_active_pdu
+from simple_rdp.pdu import parse_update_pdu
 
 
 class TestSecurityHeaderFlags:
@@ -72,11 +68,9 @@ class TestSecurityHeaderFlags:
 
     def test_flags_are_powers_of_two(self) -> None:
         """Test that flags are powers of two for bitwise OR."""
-        from simple_rdp.pdu import (
-            SEC_ENCRYPT,
-            SEC_EXCHANGE_PKT,
-            SEC_LICENSE_PKT,
-        )
+        from simple_rdp.pdu import SEC_ENCRYPT
+        from simple_rdp.pdu import SEC_EXCHANGE_PKT
+        from simple_rdp.pdu import SEC_LICENSE_PKT
 
         # Each flag should be a power of 2
         assert SEC_EXCHANGE_PKT & (SEC_EXCHANGE_PKT - 1) == 0

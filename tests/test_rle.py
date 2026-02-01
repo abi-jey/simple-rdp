@@ -1,6 +1,5 @@
 """Tests for RLE decompression module."""
 
-import pytest
 
 from simple_rdp.rle import decompress_rle
 

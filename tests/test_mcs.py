@@ -4,42 +4,40 @@ import struct
 
 import pytest
 
-from simple_rdp.mcs import (
-    CS_CLUSTER,
-    CS_CORE,
-    CS_NET,
-    CS_SECURITY,
-    GCC_OBJECT_ID,
-    H221_CS_KEY,
-    MCS_TYPE_ATTACH_USER_REQUEST,
-    MCS_TYPE_CHANNEL_JOIN_REQUEST,
-    MCS_TYPE_CONNECT_INITIAL,
-    MCS_TYPE_ERECT_DOMAIN_REQUEST,
-    MCS_TYPE_SEND_DATA_REQUEST,
-    _ber_write_application_tag,
-    _ber_write_boolean,
-    _ber_write_integer,
-    _ber_write_length,
-    _ber_write_octet_string,
-    _ber_write_sequence,
-    _per_write_integer,
-    _per_write_length,
-    build_client_cluster_data,
-    build_client_core_data,
-    build_client_network_data,
-    build_client_security_data,
-    build_domain_parameters,
-    build_gcc_conference_create_request,
-    build_gcc_connect_data,
-    build_mcs_attach_user_request,
-    build_mcs_channel_join_request,
-    build_mcs_connect_initial,
-    build_mcs_erect_domain_request,
-    build_mcs_send_data_request,
-    parse_mcs_attach_user_confirm,
-    parse_mcs_channel_join_confirm,
-    parse_mcs_connect_response,
-)
+from simple_rdp.mcs import CS_CLUSTER
+from simple_rdp.mcs import CS_CORE
+from simple_rdp.mcs import CS_NET
+from simple_rdp.mcs import CS_SECURITY
+from simple_rdp.mcs import GCC_OBJECT_ID
+from simple_rdp.mcs import H221_CS_KEY
+from simple_rdp.mcs import MCS_TYPE_ATTACH_USER_REQUEST
+from simple_rdp.mcs import MCS_TYPE_CHANNEL_JOIN_REQUEST
+from simple_rdp.mcs import MCS_TYPE_CONNECT_INITIAL
+from simple_rdp.mcs import MCS_TYPE_ERECT_DOMAIN_REQUEST
+from simple_rdp.mcs import MCS_TYPE_SEND_DATA_REQUEST
+from simple_rdp.mcs import _ber_write_application_tag
+from simple_rdp.mcs import _ber_write_boolean
+from simple_rdp.mcs import _ber_write_integer
+from simple_rdp.mcs import _ber_write_length
+from simple_rdp.mcs import _ber_write_octet_string
+from simple_rdp.mcs import _ber_write_sequence
+from simple_rdp.mcs import _per_write_integer
+from simple_rdp.mcs import _per_write_length
+from simple_rdp.mcs import build_client_cluster_data
+from simple_rdp.mcs import build_client_core_data
+from simple_rdp.mcs import build_client_network_data
+from simple_rdp.mcs import build_client_security_data
+from simple_rdp.mcs import build_domain_parameters
+from simple_rdp.mcs import build_gcc_conference_create_request
+from simple_rdp.mcs import build_gcc_connect_data
+from simple_rdp.mcs import build_mcs_attach_user_request
+from simple_rdp.mcs import build_mcs_channel_join_request
+from simple_rdp.mcs import build_mcs_connect_initial
+from simple_rdp.mcs import build_mcs_erect_domain_request
+from simple_rdp.mcs import build_mcs_send_data_request
+from simple_rdp.mcs import parse_mcs_attach_user_confirm
+from simple_rdp.mcs import parse_mcs_channel_join_confirm
+from simple_rdp.mcs import parse_mcs_connect_response
 
 
 class TestBerEncoding:
@@ -228,7 +226,9 @@ class TestConstants:
 
     def test_mcs_confirm_type_constants(self) -> None:
         """Test MCS confirm type constants."""
-        from simple_rdp.mcs import MCS_TYPE_CONNECT_RESPONSE, MCS_TYPE_ATTACH_USER_CONFIRM, MCS_TYPE_CHANNEL_JOIN_CONFIRM
+        from simple_rdp.mcs import MCS_TYPE_ATTACH_USER_CONFIRM
+        from simple_rdp.mcs import MCS_TYPE_CHANNEL_JOIN_CONFIRM
+        from simple_rdp.mcs import MCS_TYPE_CONNECT_RESPONSE
         
         assert MCS_TYPE_CONNECT_RESPONSE == 0x66
         assert MCS_TYPE_ATTACH_USER_CONFIRM == 0x2E
@@ -236,7 +236,9 @@ class TestConstants:
 
     def test_server_user_data_types(self) -> None:
         """Test server user data type constants."""
-        from simple_rdp.mcs import SC_CORE, SC_SECURITY, SC_NET
+        from simple_rdp.mcs import SC_CORE
+        from simple_rdp.mcs import SC_NET
+        from simple_rdp.mcs import SC_SECURITY
         
         assert SC_CORE == 0x0C01
         assert SC_SECURITY == 0x0C02

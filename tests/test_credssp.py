@@ -2,26 +2,24 @@
 
 import pytest
 
-from simple_rdp.credssp import (
-    ASN1_CONTEXT_0,
-    ASN1_INTEGER,
-    ASN1_OCTET_STRING,
-    ASN1_SEQUENCE,
-    CREDSSP_VERSION,
-    NONCE_SIZE,
-    _decode_asn1_element,
-    _decode_asn1_length,
-    _encode_asn1_context,
-    _encode_asn1_integer,
-    _encode_asn1_length,
-    _encode_asn1_octet_string,
-    _encode_asn1_sequence,
-    build_ts_credentials,
-    build_ts_request,
-    build_ts_request_with_credentials,
-    build_ts_request_with_pub_key_auth,
-    parse_ts_request,
-)
+from simple_rdp.credssp import ASN1_CONTEXT_0
+from simple_rdp.credssp import ASN1_INTEGER
+from simple_rdp.credssp import ASN1_OCTET_STRING
+from simple_rdp.credssp import ASN1_SEQUENCE
+from simple_rdp.credssp import CREDSSP_VERSION
+from simple_rdp.credssp import NONCE_SIZE
+from simple_rdp.credssp import _decode_asn1_element
+from simple_rdp.credssp import _decode_asn1_length
+from simple_rdp.credssp import _encode_asn1_context
+from simple_rdp.credssp import _encode_asn1_integer
+from simple_rdp.credssp import _encode_asn1_length
+from simple_rdp.credssp import _encode_asn1_octet_string
+from simple_rdp.credssp import _encode_asn1_sequence
+from simple_rdp.credssp import build_ts_credentials
+from simple_rdp.credssp import build_ts_request
+from simple_rdp.credssp import build_ts_request_with_credentials
+from simple_rdp.credssp import build_ts_request_with_pub_key_auth
+from simple_rdp.credssp import parse_ts_request
 
 
 class TestConstants:
@@ -369,7 +367,8 @@ class TestAsn1EncodingEdgeCases:
 
     def test_encode_asn1_context_higher_tag(self) -> None:
         """Test encoding context with higher tag numbers."""
-        from simple_rdp.credssp import ASN1_CONTEXT_1, ASN1_CONTEXT_2
+        from simple_rdp.credssp import ASN1_CONTEXT_1
+        from simple_rdp.credssp import ASN1_CONTEXT_2
         
         content = b"\x00\x01\x02"
         result1 = _encode_asn1_context(ASN1_CONTEXT_1, content)
@@ -470,8 +469,10 @@ class TestCredSSPAuthComputeHash:
 
     def test_compute_client_server_hash(self) -> None:
         """Test computing client-to-server hash."""
-        from simple_rdp.credssp import CredSSPAuth, CLIENT_SERVER_HASH_MAGIC
         from hashlib import sha256
+
+        from simple_rdp.credssp import CLIENT_SERVER_HASH_MAGIC
+        from simple_rdp.credssp import CredSSPAuth
         
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         public_key = b"test_public_key_data"
@@ -484,8 +485,10 @@ class TestCredSSPAuthComputeHash:
 
     def test_compute_server_client_hash(self) -> None:
         """Test computing server-to-client hash."""
-        from simple_rdp.credssp import CredSSPAuth, SERVER_CLIENT_HASH_MAGIC
         from hashlib import sha256
+
+        from simple_rdp.credssp import SERVER_CLIENT_HASH_MAGIC
+        from simple_rdp.credssp import CredSSPAuth
         
         auth = CredSSPAuth(hostname="test", username="u", password="p")
         public_key = b"test_public_key_data"
