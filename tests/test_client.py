@@ -180,9 +180,9 @@ class TestClientInternalState:
         assert client._share_id == 0
 
     def test_initial_screen_buffer_none(self):
-        """Test initial _screen_buffer is None."""
+        """Test initial display screen_buffer is None."""
         client = RDPClient(host="localhost")
-        assert client._screen_buffer is None
+        assert client._display._screen_buffer is None
 
     def test_initial_fragment_buffer_empty(self):
         """Test initial fragment buffer is empty."""
@@ -208,7 +208,7 @@ class TestClientScreenCapture:
     async def test_screenshot_returns_blank_when_not_connected(self):
         """Test screenshot returns blank image when not connected."""
         client = RDPClient(host="localhost", width=100, height=100)
-        # _screen_buffer is None, should return blank image
+        # Display screen_buffer is None, should return blank image
         img = await client.screenshot()
         assert img.size == (100, 100)
         # Should be all black
@@ -220,15 +220,16 @@ class TestClientScreenCapture:
         from PIL import Image
 
         client = RDPClient(host="localhost", width=100, height=100)
-        # Manually set screen buffer
-        client._screen_buffer = Image.new("RGB", (100, 100), color=(255, 0, 0))
+        # Initialize and set screen buffer via display
+        client._display.initialize_screen()
+        client._display._screen_buffer = Image.new("RGB", (100, 100), color=(255, 0, 0))
 
         img = await client.screenshot()
         assert img.size == (100, 100)
         # Should be red
         assert img.getpixel((50, 50)) == (255, 0, 0)
         # Should be a copy, not the original
-        assert img is not client._screen_buffer
+        assert img is not client._display._screen_buffer
 
 
 class TestClientColorDepth:

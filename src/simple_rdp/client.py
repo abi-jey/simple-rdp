@@ -127,10 +127,6 @@ class RDPClient:
         self._channel_ids: list[int] = []
         self._share_id: int = 0
 
-        # Screen state - a buffer representing the current screen
-        self._screen_buffer: Image.Image | None = None
-        self._screen_lock = asyncio.Lock()
-
         # Pointer/cursor state
         self._pointer_x: int = 0
         self._pointer_y: int = 0
@@ -147,13 +143,12 @@ class RDPClient:
         self._receive_task: asyncio.Task[None] | None = None
         self._running = False
 
-        # Display/video recording - integrated component
+        # Display component - handles screen capture and video recording
         self._display = Display(
             width=self._width,
             height=self._height,
             fps=30,
         )
-        self._recording = False
 
     @property
     def _reader(self) -> StreamReader:
@@ -217,17 +212,19 @@ class RDPClient:
     @property
     def display(self) -> Display:
         """
-        Return the Display component for video recording.
+        Return the Display component for screen capture and video recording.
 
-        The Display captures screen frames and can encode them to video.
-        Use `start_recording()` and `stop_recording()` for video capture.
+        The Display handles:
+        - Screen buffer management
+        - Screenshot capture
+        - Video recording and encoding
         """
         return self._display
 
     @property
     def is_recording(self) -> bool:
         """Return whether video recording is currently active."""
-        return self._recording
+        return self._display.is_recording
 
     async def connect(self) -> None:
         """
@@ -272,8 +269,8 @@ class RDPClient:
         # Phase 10: Connection Finalization
         await self._finalize_connection()
 
-        # Initialize screen buffer
-        self._screen_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        # Initialize Display screen buffer
+        self._display.initialize_screen()
 
         # Start receive loop
         self._running = True
@@ -290,8 +287,8 @@ class RDPClient:
         self._running = False
 
         # Stop recording if active
-        if self._recording:
-            await self.stop_recording()
+        if self._display.is_recording:
+            await self._display.stop_recording()
 
         if self._receive_task:
             self._receive_task.cancel()
@@ -333,10 +330,7 @@ class RDPClient:
         Returns:
             PIL Image of the current screen state.
         """
-        async with self._screen_lock:
-            if self._screen_buffer is None:
-                return Image.new("RGB", (self._width, self._height), (0, 0, 0))
-            return self._screen_buffer.copy()
+        return await self._display.screenshot()
 
     async def save_screenshot(self, path: str) -> None:
         """
@@ -345,9 +339,7 @@ class RDPClient:
         Args:
             path: File path to save the screenshot.
         """
-        img = await self.screenshot()
-        img.save(path)
-        logger.info(f"Screenshot saved to {path}")
+        await self._display.save_screenshot(path)
 
     # ==================== Video Recording ====================
 
@@ -361,21 +353,7 @@ class RDPClient:
         Args:
             fps: Target frames per second for encoding (default: 30).
         """
-        if self._recording:
-            logger.warning("Recording already active")
-            return
-
-        # Update display fps if different
-        if fps != self._display.fps:
-            self._display = Display(
-                width=self._width,
-                height=self._height,
-                fps=fps,
-            )
-
-        await self._display.start_encoding()
-        self._recording = True
-        logger.info(f"Started video recording at {fps} fps")
+        await self._display.start_recording(fps)
 
     async def stop_recording(self) -> None:
         """
@@ -383,12 +361,7 @@ class RDPClient:
 
         After stopping, use `save_video()` to save the recorded video.
         """
-        if not self._recording:
-            return
-
-        await self._display.stop_encoding()
-        self._recording = False
-        logger.info("Stopped video recording")
+        await self._display.stop_recording()
 
     async def save_video(self, path: str) -> bool:
         """
@@ -400,15 +373,7 @@ class RDPClient:
         Returns:
             True if successful, False otherwise.
         """
-        if self._recording:
-            await self.stop_recording()
-
-        # If we have encoded chunks, save those
-        if self._display.video_buffer_size_mb > 0:
-            return await self._display.save_video(path)
-
-        # Otherwise, encode raw frames
-        return await self._display.save_raw_frames_as_video(path)
+        return await self._display.save_recording(path)
 
     def get_recording_stats(self) -> dict[str, Any]:
         """
@@ -1344,31 +1309,17 @@ class RDPClient:
             await self._process_bitmap_update(data[2:])
 
     async def _process_bitmap_update(self, data: bytes) -> None:
-        """Process a Bitmap Update and update the screen buffer."""
+        """Process a Bitmap Update and delegate to Display."""
         bitmaps = parse_bitmap_update(data)
 
-        async with self._screen_lock:
-            if self._screen_buffer is None:
-                return
-
-            for bitmap in bitmaps:
-                try:
-                    await self._apply_bitmap(bitmap)
-                except Exception as e:
-                    logger.debug(f"Error applying bitmap: {e}")
-
-            # Feed frame to Display if recording
-            if self._recording and self._screen_buffer is not None:
-                try:
-                    await self._display.add_frame(self._screen_buffer)
-                except Exception as e:
-                    logger.debug(f"Error adding frame to display: {e}")
+        for bitmap in bitmaps:
+            try:
+                await self._apply_bitmap(bitmap)
+            except Exception as e:
+                logger.debug(f"Error applying bitmap: {e}")
 
     async def _apply_bitmap(self, bitmap: dict[str, Any]) -> None:
-        """Apply a bitmap update to the screen buffer."""
-        if self._screen_buffer is None:
-            return
-
+        """Apply a bitmap update by delegating to Display."""
         width = bitmap["width"]
         height = bitmap["height"]
         bpp = bitmap["bpp"]
@@ -1398,42 +1349,10 @@ class RDPClient:
                 logger.debug(f"RLE decompression failed: {e}")
                 return
 
-        # Convert raw bitmap data to image
-        try:
-            if bpp == 32:
-                rawmode = "BGRX"  # 32-bit with alpha/padding
-                expected_size = width * height * 4
-            elif bpp == 24:
-                rawmode = "BGR"
-                expected_size = width * height * 3
-            elif bpp in (15, 16):
-                rawmode = "BGR;16" if bpp == 16 else "BGR;15"
-                expected_size = width * height * 2
-            elif bpp == 8:
-                rawmode = "P"
-                expected_size = width * height
-            else:
-                logger.debug(f"Unsupported bpp: {bpp}")
-                return
-
-            if len(data) < expected_size:
-                logger.debug(f"Bitmap data too short: {len(data)} < {expected_size}")
-                return
-
-            # RDP bitmaps are bottom-up, we need to flip them
-            # Create image from raw data using the 'raw' decoder with proper rawmode
-            img = Image.frombytes("RGB", (width, height), data[:expected_size], "raw", rawmode)
-
-            # Flip vertically (RDP sends bottom-up)
-            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-
-            # Paste onto screen buffer
-            x = bitmap["dest_left"]
-            y = bitmap["dest_top"]
-            self._screen_buffer.paste(img, (x, y))
-
-        except Exception as e:
-            logger.debug(f"Error creating bitmap image: {e}")
+        # Delegate to Display for screen buffer update
+        x = bitmap["dest_left"]
+        y = bitmap["dest_top"]
+        await self._display.apply_bitmap(x, y, width, height, data, bpp)
 
     # ==================== Input Sending ====================
 

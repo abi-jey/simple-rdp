@@ -1,8 +1,10 @@
 """
-Screen Capture - Handles screen data from RDP sessions.
+Display - Handles screen capture and video encoding from RDP sessions.
 
 Provides a Display class that manages:
-- Raw frame buffer (no PNG encoding overhead)
+- Screen buffer (PIL Image of current screen state)
+- Screenshot capture
+- Raw frame buffer for video
 - Live ffmpeg video encoding via subprocess
 - Async video output queue with 100MB cap
 """
@@ -19,9 +21,9 @@ from dataclasses import dataclass
 from dataclasses import field
 from logging import getLogger
 from typing import TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from PIL import Image
+from PIL import Image
 
 logger = getLogger(__name__)
 
@@ -57,9 +59,11 @@ class VideoChunk:
 
 class Display:
     """
-    Manages screen capture with live video encoding.
+    Manages screen capture and video encoding.
 
     Features:
+    - Screen buffer (PIL Image representing current screen state)
+    - Screenshot capture and saving
     - Raw frame buffer (stores uncompressed RGB data for speed)
     - Live ffmpeg encoding to H.264 video stream
     - Async video output queue with configurable size limit
@@ -94,6 +98,10 @@ class Display:
         self._max_video_buffer_bytes = int(max_video_buffer_mb * 1024 * 1024)
         self._max_raw_frames = max_raw_frames
 
+        # Screen buffer - the current screen state as a PIL Image
+        self._screen_buffer: Image.Image | None = None
+        self._screen_lock = asyncio.Lock()
+
         # Raw frame storage (deque for O(1) append and popleft)
         self._raw_frames: deque[ScreenBuffer] = deque(maxlen=max_raw_frames)
         self._frame_count = 0
@@ -102,7 +110,7 @@ class Display:
         self._ffmpeg_process: subprocess.Popen[bytes] | None = None
         self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
-        self._running = False
+        self._recording = False
 
         # Video output buffer (chunked encoded video)
         self._video_chunks: deque[VideoChunk] = deque()
@@ -119,6 +127,7 @@ class Display:
             "bytes_encoded": 0,
             "chunks_evicted": 0,
             "encoding_errors": 0,
+            "bitmaps_applied": 0,
         }
 
         # Lock for thread-safe frame access
@@ -154,14 +163,126 @@ class Display:
 
     @property
     def is_encoding(self) -> bool:
-        return self._running and self._ffmpeg_process is not None
+        return self._recording and self._ffmpeg_process is not None
 
-    async def start_encoding(self) -> None:
-        """Start the ffmpeg encoding process."""
-        if self._running:
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
+    @property
+    def screen_buffer(self) -> Image.Image | None:
+        """Return the current screen buffer (may be None if not initialized)."""
+        return self._screen_buffer
+
+    def initialize_screen(self) -> None:
+        """Initialize the screen buffer with a black image."""
+        self._screen_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+
+    async def screenshot(self) -> Image.Image:
+        """
+        Capture the current screen.
+
+        Returns:
+            PIL Image of the current screen state.
+        """
+        async with self._screen_lock:
+            if self._screen_buffer is None:
+                return Image.new("RGB", (self._width, self._height), (0, 0, 0))
+            return self._screen_buffer.copy()
+
+    async def save_screenshot(self, path: str) -> None:
+        """
+        Save a screenshot to a file.
+
+        Args:
+            path: File path to save the screenshot.
+        """
+        img = await self.screenshot()
+        img.save(path)
+        logger.info(f"Screenshot saved to {path}")
+
+    async def apply_bitmap(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        data: bytes,
+        bpp: int = 32,
+    ) -> None:
+        """
+        Apply a bitmap update to the screen buffer.
+
+        This is called by the RDP client when it receives bitmap updates
+        from the server.
+
+        Args:
+            x: Destination X coordinate.
+            y: Destination Y coordinate.
+            width: Bitmap width.
+            height: Bitmap height.
+            data: Raw bitmap data (already decompressed, RGB format).
+            bpp: Bits per pixel of the source data.
+        """
+        async with self._screen_lock:
+            if self._screen_buffer is None:
+                self.initialize_screen()
+
+            try:
+                # Determine raw mode based on bpp
+                if bpp == 32:
+                    rawmode = "BGRX"
+                    expected_size = width * height * 4
+                elif bpp == 24:
+                    rawmode = "BGR"
+                    expected_size = width * height * 3
+                elif bpp in (15, 16):
+                    rawmode = "BGR;16" if bpp == 16 else "BGR;15"
+                    expected_size = width * height * 2
+                elif bpp == 8:
+                    rawmode = "P"
+                    expected_size = width * height
+                else:
+                    logger.debug(f"Unsupported bpp: {bpp}")
+                    return
+
+                if len(data) < expected_size:
+                    logger.debug(f"Bitmap data too short: {len(data)} < {expected_size}")
+                    return
+
+                # Create image from raw data
+                img = Image.frombytes("RGB", (width, height), data[:expected_size], "raw", rawmode)
+
+                # Flip vertically (RDP sends bottom-up)
+                img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+
+                # Paste onto screen buffer
+                self._screen_buffer.paste(img, (x, y))
+                self._stats["bitmaps_applied"] += 1
+
+                # If recording, capture frame
+                if self._recording:
+                    await self._capture_frame_for_recording()
+
+            except Exception as e:
+                logger.debug(f"Error applying bitmap: {e}")
+
+    async def _capture_frame_for_recording(self) -> None:
+        """Capture current screen buffer as a frame for video recording."""
+        if self._screen_buffer is None:
             return
 
-        self._running = True
+        try:
+            await self.add_frame(self._screen_buffer)
+        except Exception as e:
+            logger.debug(f"Error capturing frame for recording: {e}")
+
+    async def start_encoding(self) -> None:
+        """Start the ffmpeg encoding process for video recording."""
+        if self._recording:
+            return
+
+        self._recording = True
 
         # Start ffmpeg process
         # Input: raw RGB24 frames via stdin
@@ -211,7 +332,7 @@ class Display:
 
     async def stop_encoding(self) -> None:
         """Stop the ffmpeg encoding process."""
-        self._running = False
+        self._recording = False
 
         if self._ffmpeg_process:
             # Close stdin to signal EOF
@@ -291,7 +412,7 @@ class Display:
         """Read encoded video from ffmpeg stdout and buffer it."""
         CHUNK_SIZE = 65536  # 64KB chunks
 
-        while self._running and self._ffmpeg_process:
+        while self._recording and self._ffmpeg_process:
             try:
                 # Read in a thread to avoid blocking
                 loop = asyncio.get_event_loop()
@@ -468,13 +589,52 @@ class Display:
             logger.error(f"Error saving video: {e}")
             return False
 
+    async def start_recording(self, fps: int | None = None) -> None:
+        """
+        Start video recording.
+
+        Args:
+            fps: Target frames per second (default: use instance fps).
+        """
+        if fps is not None and fps != self._fps:
+            self._fps = fps
+        await self.start_encoding()
+        logger.info(f"Started video recording at {self._fps} fps")
+
+    async def stop_recording(self) -> None:
+        """Stop video recording."""
+        await self.stop_encoding()
+        logger.info("Stopped video recording")
+
+    async def save_recording(self, path: str) -> bool:
+        """
+        Save the recorded video to a file.
+
+        Args:
+            path: Output file path.
+
+        Returns:
+            True if successful.
+        """
+        if self._recording:
+            await self.stop_recording()
+
+        # If we have encoded chunks, save those
+        if self.video_buffer_size_mb > 0:
+            return await self.save_video(path)
+
+        # Otherwise, encode raw frames
+        return await self.save_raw_frames_as_video(path)
+
     def print_stats(self) -> None:
         """Print current statistics."""
         print(f"\n{'=' * 50}")
         print("           DISPLAY STATS")
         print(f"{'=' * 50}")
+        print(f"🖥️  Screen buffer:         {'Initialized' if self._screen_buffer else 'Not initialized'}")
         print(f"📷 Raw frames in buffer:  {self.raw_frame_count}")
         print(f"   Total frames received: {self._stats['frames_received']}")
+        print(f"   Bitmaps applied:       {self._stats['bitmaps_applied']}")
         print(f"🎬 Frames encoded:        {self._stats['frames_encoded']}")
         print(f"💾 Video buffer:          {self.video_buffer_size_mb:.2f} MB")
         print(f"   Bytes encoded:         {self._stats['bytes_encoded'] / 1024 / 1024:.2f} MB")
