@@ -450,9 +450,9 @@ class Display:
         if not self._streaming:
             await self.start_streaming()
 
-        # Open file for writing
+        # Open file for writing (we manage the file handle lifecycle manually)
         try:
-            self._recording_file = open(path, "wb")
+            self._recording_file = open(path, "wb")  # noqa: SIM115
             self._recording_to_file = True
             self._recording_path = path
             logger.info(f"File recording started: {path}")
