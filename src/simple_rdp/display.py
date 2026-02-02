@@ -109,9 +109,11 @@ class Display:
         self._ffmpeg_process: subprocess.Popen[bytes] | None = None
         self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
-        self._recording = False
+        self._streaming = False  # Encoding to memory buffer for streaming
+        self._recording_to_file = False  # Recording directly to file
+        self._recording_path: str | None = None  # Path for file recording
 
-        # Video output buffer (chunked encoded video)
+        # Video output buffer (chunked encoded video for streaming)
         self._video_chunks: deque[VideoChunk] = deque()
         self._video_buffer_size = 0
         self._chunk_sequence = 0
@@ -181,19 +183,31 @@ class Display:
         return self._stats.copy()
 
     @property
-    def is_encoding(self) -> bool:
-        return self._recording and self._ffmpeg_process is not None
+    def is_streaming(self) -> bool:
+        """True if streaming to memory buffer is active."""
+        return self._streaming and self._ffmpeg_process is not None
 
     @property
-    def is_recording(self) -> bool:
-        return self._recording
+    def is_file_recording(self) -> bool:
+        """True if recording directly to file is active."""
+        return self._recording_to_file
+
+    @property
+    def is_encoding(self) -> bool:
+        """True if any encoding (streaming or file recording) is active."""
+        return self._ffmpeg_process is not None
 
     @property
     def recording_duration_seconds(self) -> float:
-        """Return how long recording has been active, or 0 if not recording."""
+        """Return how long encoding (streaming or file) has been active."""
         if self._recording_start_time is None:
             return 0.0
         return time.time() - self._recording_start_time
+
+    @property
+    def is_recording(self) -> bool:
+        """Deprecated: Use is_streaming or is_file_recording instead."""
+        return self._streaming or self._recording_to_file
 
     @property
     def session_duration_seconds(self) -> float:
@@ -348,18 +362,27 @@ class Display:
             except Exception as e:
                 logger.debug(f"Error applying bitmap: {e}")
 
-    async def start_encoding(self) -> None:
-        """Start the ffmpeg encoding process for video recording."""
-        if self._recording:
+    async def start_streaming(self) -> None:
+        """
+        Start streaming video to memory buffer.
+
+        Frames are encoded to MPEG-TS format and stored in chunks for
+        live consumption via get_next_video_chunk().
+
+        This is ideal for real-time streaming to network consumers.
+        For recording directly to a file, use start_file_recording().
+        """
+        if self._streaming or self._recording_to_file:
+            logger.warning("Encoding already active")
             return
 
-        self._recording = True
+        self._streaming = True
         self._recording_start_time = time.time()  # Wall-clock time
-        self._first_frame_time = None  # Reset for new recording
+        self._first_frame_time = None  # Reset for new session
 
         # Start ffmpeg process
         # Input: raw RGB24 frames via stdin
-        # Output: H.264 fragmented MP4 to stdout (for streaming)
+        # Output: H.264 MPEG-TS to stdout (for streaming chunks)
         cmd = [
             "ffmpeg",
             "-y",
@@ -388,7 +411,7 @@ class Display:
             "pipe:1",  # stdout
         ]
 
-        logger.info(f"Starting ffmpeg encoder: {self._width}x{self._height} @ {self._fps}fps")
+        logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps")
 
         self._ffmpeg_process = subprocess.Popen(
             cmd,
@@ -401,11 +424,93 @@ class Display:
         # Start reader task to consume ffmpeg output
         self._reader_task = asyncio.create_task(self._read_video_output())
 
-        logger.info("Ffmpeg encoder started")
+        logger.info("Streaming encoder started")
 
-    async def stop_encoding(self) -> None:
-        """Stop the ffmpeg encoding process."""
-        self._recording = False
+    async def start_file_recording(self, path: str) -> None:
+        """
+        Start recording video directly to a file.
+
+        This writes frames directly to the output file (not to memory buffer).
+        Use this for full session recording without memory limits.
+
+        Args:
+            path: Output file path (e.g., "recording.mp4").
+
+        For streaming to memory buffer, use start_streaming() instead.
+        """
+        if self._streaming or self._recording_to_file:
+            logger.warning("Encoding already active")
+            return
+
+        self._recording_to_file = True
+        self._recording_path = path
+        self._recording_start_time = time.time()
+        self._first_frame_time = None
+
+        # Start ffmpeg process - output directly to file
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{self._width}x{self._height}",
+            "-r",
+            str(self._fps),
+            "-i",
+            "pipe:0",  # stdin
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",  # Better quality for file recording
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "23",
+            path,  # Output directly to file
+        ]
+
+        logger.info(f"Starting file recording to {path}: {self._width}x{self._height} @ {self._fps}fps")
+
+        self._ffmpeg_process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+
+        logger.info(f"File recording started: {path}")
+
+    # Keep start_encoding as alias for backwards compatibility
+    async def start_encoding(self) -> None:
+        """Deprecated: Use start_streaming() instead."""
+        await self.start_streaming()
+
+    async def stop_streaming(self) -> None:
+        """Stop streaming to memory buffer."""
+        if not self._streaming:
+            return
+
+        self._streaming = False
+        await self._stop_ffmpeg()
+        logger.info("Streaming stopped")
+
+    async def stop_file_recording(self) -> None:
+        """Stop file recording."""
+        if not self._recording_to_file:
+            return
+
+        path = self._recording_path
+        self._recording_to_file = False
+        self._recording_path = None
+        await self._stop_ffmpeg()
+        logger.info(f"File recording stopped: {path}")
+
+    async def _stop_ffmpeg(self) -> None:
+        """Internal: stop the ffmpeg process."""
         self._recording_start_time = None
 
         if self._ffmpeg_process:
@@ -430,7 +535,13 @@ class Display:
                 await self._reader_task
             self._reader_task = None
 
-        logger.info("Ffmpeg encoder stopped")
+    # Keep stop_encoding as alias for backwards compatibility
+    async def stop_encoding(self) -> None:
+        """Deprecated: Use stop_streaming() or stop_file_recording() instead."""
+        if self._streaming:
+            await self.stop_streaming()
+        elif self._recording_to_file:
+            await self.stop_file_recording()
 
     async def add_frame(self, image: Image.Image) -> None:
         """
@@ -487,10 +598,10 @@ class Display:
                 logger.debug(f"Error writing to ffmpeg: {e}")
 
     async def _read_video_output(self) -> None:
-        """Read encoded video from ffmpeg stdout and buffer it."""
+        """Read encoded video from ffmpeg stdout and buffer it (streaming mode only)."""
         CHUNK_SIZE = 65536  # 64KB chunks
 
-        while self._recording and self._ffmpeg_process:
+        while self._streaming and self._ffmpeg_process:
             try:
                 # Read in a thread to avoid blocking
                 loop = asyncio.get_event_loop()
@@ -605,13 +716,18 @@ class Display:
             logger.error(f"Error saving video: {e}")
             return False
 
-    async def save_raw_frames_as_video(self, path: str, use_true_timing: bool = True) -> bool:
+    async def save_buffer_as_video(self, path: str, use_true_timing: bool = True) -> bool:
         """
-        Encode raw frames to video file using ffmpeg.
+        Encode the raw frame buffer to a video file.
+
+        This saves the current in-memory raw frame buffer (rolling window) to
+        a video file. Frames older than max_raw_frames have been discarded.
 
         When use_true_timing=True (default), the video duration will match
         the actual elapsed wall-clock time between frames. This means if
         frames were dropped, the video still has correct real-world timing.
+
+        For full session recording without buffer limits, use start_file_recording().
 
         Args:
             path: Output file path.
@@ -689,26 +805,31 @@ class Display:
             logger.error(f"Error saving video: {e}")
             return False
 
+    # Deprecated methods for backwards compatibility
+
+    async def save_raw_frames_as_video(self, path: str, use_true_timing: bool = True) -> bool:
+        """Deprecated: Use save_buffer_as_video() instead."""
+        return await self.save_buffer_as_video(path, use_true_timing)
+
     async def start_recording(self, fps: int | None = None) -> None:
         """
-        Start video recording.
+        Deprecated: Use start_streaming() or start_file_recording() instead.
 
         Args:
             fps: Target frames per second (default: use instance fps).
         """
         if fps is not None and fps != self._fps:
             self._fps = fps
-        await self.start_encoding()
-        logger.info(f"Started video recording at {self._fps} fps")
+        await self.start_streaming()
+        logger.info(f"Started video encoding at {self._fps} fps")
 
     async def stop_recording(self) -> None:
-        """Stop video recording."""
+        """Deprecated: Use stop_streaming() or stop_file_recording() instead."""
         await self.stop_encoding()
-        logger.info("Stopped video recording")
 
     async def save_recording(self, path: str) -> bool:
         """
-        Save the recorded video to a file.
+        Deprecated: Use save_buffer_as_video() instead.
 
         Args:
             path: Output file path.
@@ -716,15 +837,15 @@ class Display:
         Returns:
             True if successful.
         """
-        if self._recording:
-            await self.stop_recording()
+        if self.is_streaming:
+            await self.stop_streaming()
 
         # If we have encoded chunks, save those
         if self.video_buffer_size_mb > 0:
             return await self.save_video(path)
 
         # Otherwise, encode raw frames
-        return await self.save_raw_frames_as_video(path)
+        return await self.save_buffer_as_video(path)
 
     def print_stats(self) -> None:
         """Print current statistics."""
