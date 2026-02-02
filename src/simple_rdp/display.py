@@ -34,7 +34,7 @@ class ScreenBuffer:
     height: int
     data: bytes
     format: str = "RGB"
-    timestamp: float = field(default_factory=time.perf_counter)
+    timestamp: float = field(default_factory=time.time)  # Wall-clock time
 
     @property
     def size_bytes(self) -> int:
@@ -119,7 +119,8 @@ class Display:
         # Async queue for new chunks (for consumers)
         self._video_queue: Queue[VideoChunk] = Queue()
 
-        # Recording timing
+        # Session and recording timing (wall-clock times)
+        self._session_start_time: float = time.time()  # When display was created
         self._recording_start_time: float | None = None
         self._first_frame_time: float | None = None
 
@@ -192,7 +193,31 @@ class Display:
         """Return how long recording has been active, or 0 if not recording."""
         if self._recording_start_time is None:
             return 0.0
-        return time.perf_counter() - self._recording_start_time
+        return time.time() - self._recording_start_time
+
+    @property
+    def session_duration_seconds(self) -> float:
+        """Return how long since the session started (wall-clock)."""
+        return time.time() - self._session_start_time
+
+    @property
+    def session_start_time(self) -> float:
+        """Return the wall-clock timestamp when the session started."""
+        return self._session_start_time
+
+    @property
+    def buffer_time_range(self) -> tuple[float, float]:
+        """
+        Return the time range of buffered frames as (oldest_time, newest_time).
+
+        Times are relative to session start (in seconds).
+        Returns (0, 0) if no frames are buffered.
+        """
+        if not self._raw_frames:
+            return (0.0, 0.0)
+        oldest = self._raw_frames[0].timestamp - self._session_start_time
+        newest = self._raw_frames[-1].timestamp - self._session_start_time
+        return (oldest, newest)
 
     @property
     def buffer_delay_seconds(self) -> float:
@@ -205,19 +230,19 @@ class Display:
         if not self._raw_frames:
             return 0.0
         oldest_frame = self._raw_frames[0]
-        return time.perf_counter() - oldest_frame.timestamp
+        return time.time() - oldest_frame.timestamp
 
     @property
     def effective_fps(self) -> float:
         """
         Return the actual frames per second being received.
 
-        Calculated from frames received since recording started.
+        Calculated from frames received since first frame.
         Returns 0 if not enough data.
         """
         if self._first_frame_time is None or self._stats["frames_received"] < 2:
             return 0.0
-        elapsed = time.perf_counter() - self._first_frame_time
+        elapsed = time.time() - self._first_frame_time
         if elapsed <= 0:
             return 0.0
         return self._stats["frames_received"] / elapsed
@@ -329,7 +354,7 @@ class Display:
             return
 
         self._recording = True
-        self._recording_start_time = time.perf_counter()
+        self._recording_start_time = time.time()  # Wall-clock time
         self._first_frame_time = None  # Reset for new recording
 
         # Start ffmpeg process
@@ -432,7 +457,7 @@ class Display:
         Args:
             data: Raw RGB24 bytes (width * height * 3 bytes).
         """
-        timestamp = time.perf_counter()
+        timestamp = time.time()  # Wall-clock time for accurate seeking
 
         # Track first frame time for effective FPS calculation
         if self._first_frame_time is None:
@@ -526,6 +551,7 @@ class Display:
 
         Returns:
             List of ScreenBuffer frames (oldest first).
+            Each frame has a wall-clock timestamp for true timing.
         """
         if count is None:
             return list(self._raw_frames)
@@ -579,15 +605,18 @@ class Display:
             logger.error(f"Error saving video: {e}")
             return False
 
-    async def save_raw_frames_as_video(self, path: str, fps: int | None = None) -> bool:
+    async def save_raw_frames_as_video(self, path: str, use_true_timing: bool = True) -> bool:
         """
         Encode raw frames to video file using ffmpeg.
 
-        This is useful when not using live encoding.
+        When use_true_timing=True (default), the video duration will match
+        the actual elapsed wall-clock time between frames. This means if
+        frames were dropped, the video still has correct real-world timing.
 
         Args:
             path: Output file path.
-            fps: Frames per second (default: self._fps).
+            use_true_timing: If True, video duration matches real elapsed time.
+                             If False, uses fixed fps (may not match real time).
 
         Returns:
             True if successful.
@@ -596,7 +625,23 @@ class Display:
             logger.warning("No frames to save")
             return False
 
-        fps = fps or self._fps
+        frames = list(self._raw_frames)
+
+        # Calculate actual elapsed time and effective FPS for true timing
+        if len(frames) >= 2:
+            elapsed_time = frames[-1].timestamp - frames[0].timestamp
+            actual_fps = len(frames) / elapsed_time if elapsed_time > 0 else self._fps
+        else:
+            elapsed_time = 0
+            actual_fps = self._fps
+
+        # Use actual fps for true timing, or configured fps
+        output_fps = actual_fps if use_true_timing else self._fps
+
+        logger.info(
+            f"Saving {len(frames)} frames, elapsed: {elapsed_time:.2f}s, "
+            f"fps: {output_fps:.1f} (true_timing={use_true_timing})"
+        )
 
         cmd = [
             "ffmpeg",
@@ -608,7 +653,7 @@ class Display:
             "-s",
             f"{self._width}x{self._height}",
             "-r",
-            str(fps),
+            str(output_fps),
             "-i",
             "pipe:0",
             "-c:v",
@@ -630,13 +675,15 @@ class Display:
             )
 
             if process.stdin:
-                for frame in self._raw_frames:
+                for frame in frames:
                     process.stdin.write(frame.data)
                 process.stdin.close()
 
             process.wait()
 
-            logger.info(f"Saved {len(self._raw_frames)} frames to {path}")
+            logger.info(
+                f"Saved video to {path} (duration: {elapsed_time:.2f}s, {len(frames)} frames at {output_fps:.1f} fps)"
+            )
             return True
         except Exception as e:
             logger.error(f"Error saving video: {e}")
