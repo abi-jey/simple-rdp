@@ -81,6 +81,7 @@ nav:
       - Installation: getting-started/installation.md
       - Quick Start: getting-started/quickstart.md
       - Configuration: getting-started/configuration.md
+      - Testing with VirtualBox: getting-started/testing.md
   - User Guide:
       - Screen Capture: guide/screen-capture.md
       - Mouse Input: guide/mouse-input.md
