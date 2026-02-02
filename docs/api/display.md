@@ -235,6 +235,80 @@ Get encoding statistics.
 - `bytes_encoded` - Total bytes of encoded video
 - `chunks_evicted` - Video chunks removed due to buffer limit
 - `encoding_errors` - Number of encoding errors
+- `bitmaps_applied` - Number of RDP bitmap updates applied
+
+### is_recording
+
+```python
+@property
+def is_recording(self) -> bool
+```
+
+Whether video recording is currently active.
+
+### recording_duration_seconds
+
+```python
+@property
+def recording_duration_seconds(self) -> float
+```
+
+How long recording has been active in seconds. Returns 0 if not recording.
+
+**Example:**
+
+```python
+await display.start_recording()
+await asyncio.sleep(5)
+print(f"Recording for {display.recording_duration_seconds:.1f}s")  # ~5.0s
+```
+
+### buffer_delay_seconds
+
+```python
+@property
+def buffer_delay_seconds(self) -> float
+```
+
+The delay between the oldest buffered frame and now.
+
+This indicates how far behind real-time the buffer is. Useful for monitoring latency.
+Returns 0 if no frames are buffered.
+
+**Example:**
+
+```python
+# If oldest frame was captured 0.5 seconds ago:
+print(f"Buffer delay: {display.buffer_delay_seconds:.2f}s")  # 0.50s
+```
+
+### effective_fps
+
+```python
+@property
+def effective_fps(self) -> float
+```
+
+The actual frames per second being received.
+
+Calculated from total frames received since recording started, divided by elapsed time.
+Returns 0 if not enough data (< 2 frames).
+
+**Example:**
+
+```python
+# During active recording:
+print(f"Actual FPS: {display.effective_fps:.1f}")  # e.g., 28.5
+```
+
+### screen_buffer
+
+```python
+@property
+def screen_buffer(self) -> Image.Image | None
+```
+
+The current screen buffer as a PIL Image, or None if not initialized.
 
 ---
 

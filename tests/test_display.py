@@ -128,6 +128,21 @@ class TestDisplay:
         display.clear_video_chunks()
         assert display.video_buffer_size_mb == 0.0
 
+    def test_recording_duration_not_recording(self) -> None:
+        """Test recording_duration_seconds is 0 when not recording."""
+        display = Display(width=100, height=100)
+        assert display.recording_duration_seconds == 0.0
+
+    def test_buffer_delay_no_frames(self) -> None:
+        """Test buffer_delay_seconds is 0 when no frames."""
+        display = Display(width=100, height=100)
+        assert display.buffer_delay_seconds == 0.0
+
+    def test_effective_fps_no_frames(self) -> None:
+        """Test effective_fps is 0 when no frames."""
+        display = Display(width=100, height=100)
+        assert display.effective_fps == 0.0
+
 
 class TestDisplayAsync:
     """Async tests for Display class."""
@@ -189,6 +204,28 @@ class TestDisplayAsync:
             await display.add_raw_frame(frame_data)
         frames = display.get_frames(count=2)
         assert len(frames) == 2
+
+    @pytest.mark.asyncio
+    async def test_effective_fps_with_frames(self) -> None:
+        """Test effective_fps after adding frames."""
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        await display.add_raw_frame(frame_data)
+        await display.add_raw_frame(frame_data)
+        # After 2 frames, effective_fps should be calculable
+        assert display.effective_fps >= 0
+
+    @pytest.mark.asyncio
+    async def test_buffer_delay_with_frames(self) -> None:
+        """Test buffer_delay_seconds after adding frames."""
+        import asyncio
+
+        display = Display(width=10, height=10)
+        frame_data = b"\x00" * 300
+        await display.add_raw_frame(frame_data)
+        await asyncio.sleep(0.05)  # Small delay
+        # Buffer delay should be > 0 since frame is slightly old
+        assert display.buffer_delay_seconds >= 0.04
 
     @pytest.mark.asyncio
     async def test_clear_raw_frames_after_add(self) -> None:

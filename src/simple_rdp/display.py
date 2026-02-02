@@ -118,6 +118,10 @@ class Display:
         # Async queue for new chunks (for consumers)
         self._video_queue: Queue[VideoChunk] = Queue()
 
+        # Recording timing
+        self._recording_start_time: float | None = None
+        self._first_frame_time: float | None = None
+
         # Stats
         self._stats = {
             "frames_received": 0,
@@ -166,6 +170,41 @@ class Display:
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def recording_duration_seconds(self) -> float:
+        """Return how long recording has been active, or 0 if not recording."""
+        if self._recording_start_time is None:
+            return 0.0
+        return time.perf_counter() - self._recording_start_time
+
+    @property
+    def buffer_delay_seconds(self) -> float:
+        """
+        Return the delay between oldest buffered frame and now.
+
+        This indicates how far behind real-time the buffer is.
+        Returns 0 if no frames are buffered.
+        """
+        if not self._raw_frames:
+            return 0.0
+        oldest_frame = self._raw_frames[0]
+        return time.perf_counter() - oldest_frame.timestamp
+
+    @property
+    def effective_fps(self) -> float:
+        """
+        Return the actual frames per second being received.
+
+        Calculated from frames received since recording started.
+        Returns 0 if not enough data.
+        """
+        if self._first_frame_time is None or self._stats["frames_received"] < 2:
+            return 0.0
+        elapsed = time.perf_counter() - self._first_frame_time
+        if elapsed <= 0:
+            return 0.0
+        return self._stats["frames_received"] / elapsed
 
     @property
     def screen_buffer(self) -> Image.Image | None:
@@ -285,6 +324,8 @@ class Display:
             return
 
         self._recording = True
+        self._recording_start_time = time.perf_counter()
+        self._first_frame_time = None  # Reset for new recording
 
         # Start ffmpeg process
         # Input: raw RGB24 frames via stdin
@@ -335,6 +376,7 @@ class Display:
     async def stop_encoding(self) -> None:
         """Stop the ffmpeg encoding process."""
         self._recording = False
+        self._recording_start_time = None
 
         if self._ffmpeg_process:
             # Close stdin to signal EOF
@@ -386,6 +428,10 @@ class Display:
             data: Raw RGB24 bytes (width * height * 3 bytes).
         """
         timestamp = time.perf_counter()
+
+        # Track first frame time for effective FPS calculation
+        if self._first_frame_time is None:
+            self._first_frame_time = timestamp
 
         frame = ScreenBuffer(
             width=self._width,
@@ -637,6 +683,9 @@ class Display:
         print(f"📷 Raw frames in buffer:  {self.raw_frame_count}")
         print(f"   Total frames received: {self._stats['frames_received']}")
         print(f"   Bitmaps applied:       {self._stats['bitmaps_applied']}")
+        print(f"⏱️  Recording duration:    {self.recording_duration_seconds:.1f}s")
+        print(f"   Effective FPS:         {self.effective_fps:.1f}")
+        print(f"   Buffer delay:          {self.buffer_delay_seconds:.2f}s")
         print(f"🎬 Frames encoded:        {self._stats['frames_encoded']}")
         print(f"💾 Video buffer:          {self.video_buffer_size_mb:.2f} MB")
         print(f"   Bytes encoded:         {self._stats['bytes_encoded'] / 1024 / 1024:.2f} MB")
