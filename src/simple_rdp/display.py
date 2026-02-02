@@ -225,7 +225,7 @@ class Display:
         async with self._screen_lock:
             if self._screen_buffer is None:
                 self.initialize_screen()
-            
+
             # After initialization, screen_buffer should exist
             if self._screen_buffer is None:
                 return
