@@ -4,7 +4,7 @@ The `Display` class provides video encoding and frame buffering capabilities usi
 
 !!! info "Integrated with RDPClient"
     The `Display` is automatically integrated into `RDPClient`. Access it via `client.display` 
-    or use the convenience methods `client.start_recording()`, `client.save_video()`, etc.
+    or use the convenience methods `client.start_streaming()`, `client.start_file_recording()`, etc.
     
     For most use cases, you don't need to interact with Display directly.
 
@@ -12,9 +12,10 @@ The `Display` class provides video encoding and frame buffering capabilities usi
 
 The Display class manages:
 
-- **Raw frame storage** - Uncompressed RGB frames in a deque buffer
-- **Live video encoding** - Real-time H.264 encoding via ffmpeg subprocess  
-- **Video buffering** - Async queue with configurable size limits
+- **Raw frame storage** - Uncompressed RGB frames in a deque buffer (~10 seconds)
+- **Live video streaming** - Real-time H.264 encoding via ffmpeg subprocess  
+- **File recording** - Taps into streaming output for unlimited duration recording
+- **Video buffering** - Async queue with configurable size limits (100MB default)
 - **Frame eviction** - Automatic cleanup when buffers exceed limits
 
 ---
@@ -25,17 +26,22 @@ The Display class manages:
 from simple_rdp import RDPClient
 
 async with RDPClient(host="...", username="...", password="...") as client:
-    # Start recording (Display is used internally)
-    await client.start_recording()
+    # Start streaming to memory buffer
+    await client.start_streaming()
+    
+    # Optionally also record to file (unlimited duration)
+    await client.start_file_recording("session.ts")
     
     # ... perform actions ...
     
-    # Save video
-    await client.save_video("recording.ts")
+    # Stop recording (streaming continues)
+    await client.stop_file_recording()
     
-    # Access Display for advanced operations
-    display = client.display
-    print(f"Frames: {display.stats['frames_encoded']}")
+    # Stop streaming
+    await client.stop_streaming()
+    
+    # Or save the raw frame buffer as video
+    await client.save_video("clip.mp4")
 ```
 
 ---
@@ -53,7 +59,7 @@ class ScreenBuffer:
     height: int
     data: bytes
     format: str = "RGB"
-    timestamp: float = field(default_factory=time.perf_counter)
+    timestamp: float = field(default_factory=time.time)
 ```
 
 | Field | Type | Description |
@@ -62,7 +68,7 @@ class ScreenBuffer:
 | `height` | `int` | Frame height in pixels |
 | `data` | `bytes` | Raw pixel data |
 | `format` | `str` | Pixel format (default: `"RGB"`) |
-| `timestamp` | `float` | Capture timestamp |
+| `timestamp` | `float` | Wall-clock capture timestamp |
 
 #### Properties
 
@@ -104,59 +110,43 @@ class VideoChunk:
 def size_bytes(self) -> int
 ```
 
-Return the size of the chunk in bytes.
+Return the size of the encoded data in bytes.
 
 ---
 
 ### Display
 
-Main class for video encoding and frame management.
-
-## Constructor
+The main class for managing screen capture and video encoding.
 
 ```python
-Display(
-    width: int = 1920,
-    height: int = 1080,
-    fps: int = 30,
-    max_video_buffer_mb: float = 100,
-    max_raw_frames: int | None = None,  # Defaults to fps * 10
-)
+class Display:
+    def __init__(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        fps: int = 30,
+        max_video_buffer_mb: float = 100,
+        max_raw_frames: int | None = None,
+    ) -> None
 ```
 
-### Parameters
+**Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `width` | `int` | `1920` | Frame width in pixels |
 | `height` | `int` | `1080` | Frame height in pixels |
-| `fps` | `int` | `30` | Target frames per second for encoding |
-| `max_video_buffer_mb` | `float` | `100` | Maximum video buffer size in MB |
-| `max_raw_frames` | `int \| None` | `None` | Maximum raw frames to buffer. Defaults to `fps * 10` (~10 seconds) |
-
-### Example
-
-```python
-from simple_rdp import Display
-
-# Create display for 1080p at 30fps (300 frame buffer = 10 seconds)
-display = Display(width=1920, height=1080, fps=30)
-print(display.max_raw_frames)  # 300
-
-# Create display at 60fps (600 frame buffer = 10 seconds)
-display = Display(width=1280, height=720, fps=60)
-print(display.max_raw_frames)  # 600
-
-# Custom buffer size (override auto-calculation)
-display = Display(fps=30, max_raw_frames=90)  # 3 seconds only
-```
-```
+| `fps` | `int` | `30` | Target frames per second |
+| `max_video_buffer_mb` | `float` | `100` | Max video buffer size in MB |
+| `max_raw_frames` | `int \| None` | `fps * 10` | Max raw frames to buffer (~10 seconds) |
 
 ---
 
 ## Properties
 
-### width
+### Dimensions & Configuration
+
+#### width
 
 ```python
 @property
@@ -165,7 +155,7 @@ def width(self) -> int
 
 Frame width in pixels.
 
-### height
+#### height
 
 ```python
 @property
@@ -174,34 +164,16 @@ def height(self) -> int
 
 Frame height in pixels.
 
-### fps
+#### fps
 
 ```python
 @property
 def fps(self) -> int
 ```
 
-Target frames per second.
+Target frames per second for encoding.
 
-### frame_count
-
-```python
-@property
-def frame_count(self) -> int
-```
-
-Total number of frames received since creation.
-
-### raw_frame_count
-
-```python
-@property
-def raw_frame_count(self) -> int
-```
-
-Number of raw frames currently in buffer.
-
-### max_raw_frames
+#### max_raw_frames
 
 ```python
 @property
@@ -210,16 +182,38 @@ def max_raw_frames(self) -> int
 
 Maximum number of raw frames that can be buffered.
 
-### raw_buffer_seconds
+---
+
+### Frame & Buffer Info
+
+#### frame_count
+
+```python
+@property
+def frame_count(self) -> int
+```
+
+Total number of frames added since creation.
+
+#### raw_frame_count
+
+```python
+@property
+def raw_frame_count(self) -> int
+```
+
+Current number of frames in the raw buffer.
+
+#### raw_buffer_seconds
 
 ```python
 @property
 def raw_buffer_seconds(self) -> float
 ```
 
-Current raw frame buffer size in seconds (frames / fps).
+Current raw frame buffer size in seconds (based on fps).
 
-### max_raw_buffer_seconds
+#### max_raw_buffer_seconds
 
 ```python
 @property
@@ -228,14 +222,7 @@ def max_raw_buffer_seconds(self) -> float
 
 Maximum raw frame buffer size in seconds.
 
-**Example:**
-```python
-display = Display(fps=60)
-print(f"Buffer capacity: {display.max_raw_buffer_seconds}s")  # 10.0s
-print(f"Current buffer: {display.raw_buffer_seconds}s")       # 0.0s
-```
-
-### video_buffer_size_mb
+#### video_buffer_size_mb
 
 ```python
 @property
@@ -244,16 +231,42 @@ def video_buffer_size_mb(self) -> float
 
 Current video buffer size in megabytes.
 
-### is_encoding
+---
+
+### Encoding State
+
+#### is_streaming
+
+```python
+@property
+def is_streaming(self) -> bool
+```
+
+Whether video streaming to memory buffer is active.
+
+#### is_file_recording
+
+```python
+@property
+def is_file_recording(self) -> bool
+```
+
+Whether file recording is active.
+
+#### is_encoding
 
 ```python
 @property
 def is_encoding(self) -> bool
 ```
 
-Whether ffmpeg encoding is currently active.
+Whether any ffmpeg encoding (streaming or file) is currently active.
 
-### stats
+---
+
+### Statistics
+
+#### stats
 
 ```python
 @property
@@ -271,52 +284,47 @@ Get encoding statistics.
 - `encoding_errors` - Number of encoding errors
 - `bitmaps_applied` - Number of RDP bitmap updates applied
 
-### is_recording
+---
 
-```python
-@property
-def is_recording(self) -> bool
-```
+### Timing
 
-Whether video recording is currently active.
-
-### recording_duration_seconds
+#### recording_duration_seconds
 
 ```python
 @property
 def recording_duration_seconds(self) -> float
 ```
 
-How long recording has been active in seconds. Returns 0 if not recording.
+How long encoding has been active in seconds. Returns 0 if not encoding.
 
-**Example:**
+#### session_duration_seconds
 
 ```python
-await display.start_recording()
-await asyncio.sleep(5)
-print(f"Recording for {display.recording_duration_seconds:.1f}s")  # ~5.0s
+@property
+def session_duration_seconds(self) -> float
 ```
 
-### buffer_delay_seconds
+How long since the Display was created (wall-clock).
+
+#### session_start_time
+
+```python
+@property
+def session_start_time(self) -> float
+```
+
+The wall-clock timestamp when the session started.
+
+#### buffer_delay_seconds
 
 ```python
 @property
 def buffer_delay_seconds(self) -> float
 ```
 
-The delay between the oldest buffered frame and now.
+The delay between the oldest buffered frame and now. Indicates latency.
 
-This indicates how far behind real-time the buffer is. Useful for monitoring latency.
-Returns 0 if no frames are buffered.
-
-**Example:**
-
-```python
-# If oldest frame was captured 0.5 seconds ago:
-print(f"Buffer delay: {display.buffer_delay_seconds:.2f}s")  # 0.50s
-```
-
-### effective_fps
+#### effective_fps
 
 ```python
 @property
@@ -325,17 +333,20 @@ def effective_fps(self) -> float
 
 The actual frames per second being received.
 
-Calculated from total frames received since recording started, divided by elapsed time.
-Returns 0 if not enough data (< 2 frames).
-
-**Example:**
+#### buffer_time_range
 
 ```python
-# During active recording:
-print(f"Actual FPS: {display.effective_fps:.1f}")  # e.g., 28.5
+@property
+def buffer_time_range(self) -> tuple[float, float]
 ```
 
-### screen_buffer
+Return the time range of buffered frames as (oldest_time, newest_time) relative to session start.
+
+---
+
+### Screen Buffer
+
+#### screen_buffer
 
 ```python
 @property
@@ -348,15 +359,17 @@ The current screen buffer as a PIL Image, or None if not initialized.
 
 ## Methods
 
-### start_encoding
+### Streaming
+
+#### start_streaming
 
 ```python
-async def start_encoding(self) -> None
+async def start_streaming(self) -> None
 ```
 
-Start the ffmpeg encoding process.
+Start streaming video to memory buffer.
 
-This spawns an ffmpeg subprocess that encodes incoming raw frames to H.264 video in MPEG-TS format.
+Frames are encoded to MPEG-TS format and stored in chunks for live consumption via `get_next_video_chunk()`.
 
 !!! warning "ffmpeg Required"
     Ensure ffmpeg is installed and available in PATH.
@@ -365,26 +378,69 @@ This spawns an ffmpeg subprocess that encodes incoming raw frames to H.264 video
 
 ```python
 display = Display(width=1920, height=1080)
-await display.start_encoding()
+await display.start_streaming()
 # ... add frames ...
-await display.stop_encoding()
+await display.stop_streaming()
 ```
 
 ---
 
-### stop_encoding
+#### stop_streaming
 
 ```python
-async def stop_encoding(self) -> None
+async def stop_streaming(self) -> None
 ```
 
-Stop the ffmpeg encoding process.
+Stop streaming to memory buffer.
 
-Closes stdin to signal EOF and waits for the process to finish.
+Also stops any active file recording (closes the file).
 
 ---
 
-### add_frame
+### File Recording
+
+#### start_file_recording
+
+```python
+async def start_file_recording(self, path: str) -> None
+```
+
+Start recording video to a file.
+
+Recording taps into the streaming output - if streaming is not active, it will be started automatically. This allows unlimited duration recording without memory limits.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | Output file path (use `.ts` extension for MPEG-TS) |
+
+**Example:**
+
+```python
+display = Display(width=1920, height=1080)
+await display.start_file_recording("session.ts")
+# ... recording continues for unlimited duration ...
+await display.stop_file_recording()
+```
+
+---
+
+#### stop_file_recording
+
+```python
+async def stop_file_recording(self) -> None
+```
+
+Stop file recording.
+
+Closes the recording file but streaming continues independently.
+
+---
+
+### Frame Management
+
+#### add_frame
 
 ```python
 async def add_frame(self, image: Image.Image) -> None
@@ -400,22 +456,9 @@ Converts the image to raw RGB bytes and stores it, then sends to ffmpeg for enco
 |-----------|------|-------------|
 | `image` | `Image.Image` | PIL Image (will be converted to RGB if needed) |
 
-**Example:**
-
-```python
-from PIL import Image
-
-display = Display(width=1920, height=1080)
-await display.start_encoding()
-
-# Add a PIL Image
-img = Image.new("RGB", (1920, 1080), color="blue")
-await display.add_frame(img)
-```
-
 ---
 
-### add_raw_frame
+#### add_raw_frame
 
 ```python
 async def add_raw_frame(self, data: bytes) -> None
@@ -429,17 +472,9 @@ Add a raw RGB frame.
 |-----------|------|-------------|
 | `data` | `bytes` | Raw RGB24 bytes (width × height × 3 bytes) |
 
-**Example:**
-
-```python
-# Add raw RGB bytes
-raw_data = b"\x00" * (1920 * 1080 * 3)  # Black frame
-await display.add_raw_frame(raw_data)
-```
-
 ---
 
-### get_latest_frame
+#### get_latest_frame
 
 ```python
 def get_latest_frame(self) -> ScreenBuffer | None
@@ -447,11 +482,9 @@ def get_latest_frame(self) -> ScreenBuffer | None
 
 Get the most recent raw frame.
 
-**Returns:** `ScreenBuffer` or `None` if no frames exist.
-
 ---
 
-### get_frames
+#### get_frames
 
 ```python
 def get_frames(self, count: int | None = None) -> list[ScreenBuffer]
@@ -469,7 +502,19 @@ Get recent raw frames.
 
 ---
 
-### get_video_chunks
+#### clear_raw_frames
+
+```python
+def clear_raw_frames(self) -> None
+```
+
+Clear all raw frames from buffer.
+
+---
+
+### Video Chunks
+
+#### get_video_chunks
 
 ```python
 def get_video_chunks(self) -> list[VideoChunk]
@@ -477,11 +522,9 @@ def get_video_chunks(self) -> list[VideoChunk]
 
 Get all buffered video chunks.
 
-**Returns:** List of `VideoChunk` objects.
-
 ---
 
-### get_next_video_chunk
+#### get_next_video_chunk
 
 ```python
 async def get_next_video_chunk(self, timeout: float = 1.0) -> VideoChunk | None
@@ -501,26 +544,15 @@ Wait for and return the next video chunk.
 
 ```python
 # Stream video chunks
-while True:
+while display.is_streaming:
     chunk = await display.get_next_video_chunk(timeout=1.0)
     if chunk:
-        # Send chunk to client/stream
         await send_to_client(chunk.data)
 ```
 
 ---
 
-### clear_raw_frames
-
-```python
-def clear_raw_frames(self) -> None
-```
-
-Clear all raw frames from buffer.
-
----
-
-### clear_video_chunks
+#### clear_video_chunks
 
 ```python
 def clear_video_chunks(self) -> None
@@ -530,7 +562,9 @@ Clear all video chunks from buffer.
 
 ---
 
-### save_video
+### Saving Video
+
+#### save_video
 
 ```python
 async def save_video(self, path: str) -> bool
@@ -546,54 +580,65 @@ Save all buffered video chunks to a file.
 
 **Returns:** `True` if successful, `False` otherwise.
 
-**Example:**
-
-```python
-# Save buffered video
-success = await display.save_video("recording.ts")
-```
-
 ---
 
-### save_raw_frames_as_video
+#### save_buffer_as_video
 
 ```python
-async def save_raw_frames_as_video(
+async def save_buffer_as_video(
     self, 
     path: str, 
-    fps: int | None = None
+    use_true_timing: bool = True
 ) -> bool
 ```
 
-Encode raw frames to video file using ffmpeg.
+Encode the raw frame buffer to a video file.
 
-This is useful when not using live encoding.
+When `use_true_timing=True` (default), the video duration matches the actual elapsed wall-clock time between frames.
 
 **Parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `path` | `str` | Output file path |
-| `fps` | `int \| None` | Frames per second (default: instance fps) |
+| `use_true_timing` | `bool` | Match real elapsed time (default: True) |
 
 **Returns:** `True` if successful, `False` otherwise.
 
 **Example:**
 
 ```python
-# Record frames without live encoding
-display = Display(width=1920, height=1080)
-
-for frame in frames:
-    await display.add_frame(frame)
-
-# Encode all frames at once
-await display.save_raw_frames_as_video("recording.mp4", fps=30)
+# Save the last ~10 seconds of buffered frames
+await display.save_buffer_as_video("clip.mp4")
 ```
 
 ---
 
-### print_stats
+### Screenshots
+
+#### screenshot
+
+```python
+async def screenshot(self) -> Image.Image
+```
+
+Capture the current screen as a PIL Image.
+
+---
+
+#### save_screenshot
+
+```python
+async def save_screenshot(self, path: str) -> None
+```
+
+Save a screenshot to a file.
+
+---
+
+### Utilities
+
+#### print_stats
 
 ```python
 def print_stats(self) -> None
@@ -601,116 +646,71 @@ def print_stats(self) -> None
 
 Print current statistics to stdout.
 
-**Output example:**
-
-```
-==================================================
-           DISPLAY STATS
-==================================================
-📷 Raw frames in buffer:  150
-   Total frames received: 1000
-🎬 Frames encoded:        1000
-💾 Video buffer:          45.23 MB
-   Bytes encoded:         45.23 MB
-   Chunks evicted:        0
-❌ Encoding errors:       0
-==================================================
-```
-
 ---
 
 ## Usage Patterns
-
-### Integrated Recording (Recommended)
-
-Use the RDPClient's built-in recording methods:
-
-```python
-import asyncio
-from simple_rdp import RDPClient
-
-
-async def record_session(host: str, username: str, password: str):
-    async with RDPClient(
-        host=host,
-        username=username,
-        password=password,
-    ) as client:
-        await asyncio.sleep(2)  # Wait for initial render
-        
-        # Start recording - frames captured automatically
-        await client.start_recording(fps=30)
-        
-        # Perform automation...
-        await client.mouse_move(500, 300)
-        await asyncio.sleep(10)
-        
-        # Save video
-        await client.save_video("session.ts")
-        
-        # Check stats via display
-        client.display.print_stats()
-```
 
 ### Live Video Streaming
 
 Stream encoded video chunks in real-time:
 
 ```python
-import asyncio
-from simple_rdp import RDPClient
-
-
-async def stream_rdp(host: str, username: str, password: str):
-    async with RDPClient(
-        host=host,
-        username=username,
-        password=password,
-    ) as client:
-        await asyncio.sleep(2)
-        
-        # Start recording
-        await client.start_recording(fps=30)
-        
-        # Stream chunks via Display
-        display = client.display
-        
-        async def stream_chunks():
-            while client.is_recording:
-                chunk = await display.get_next_video_chunk(timeout=1.0)
-                if chunk:
-                    # Send to WebSocket, HTTP stream, etc.
-                    yield chunk.data
-        
-        # Use the stream...
-        async for data in stream_chunks():
-            await send_to_client(data)
+async with RDPClient(host="...", username="...", password="...") as client:
+    await client.start_streaming()
+    
+    display = client.display
+    
+    async def stream_chunks():
+        while client.is_streaming:
+            chunk = await display.get_next_video_chunk(timeout=1.0)
+            if chunk:
+                yield chunk.data
+    
+    async for data in stream_chunks():
+        await send_to_websocket(data)
 ```
 
-### Standalone Display (Advanced)
+### Full Session Recording
 
-For custom use cases, use Display directly:
+Record an entire session to a file:
 
 ```python
-from simple_rdp import Display
-from PIL import Image
-
-
-async def custom_recording():
-    display = Display(width=1920, height=1080, fps=30)
+async with RDPClient(host="...", username="...", password="...") as client:
+    # Start recording to file (auto-starts streaming)
+    await client.start_file_recording("full_session.ts")
     
-    await display.start_encoding()
+    # Perform actions for any duration...
+    await client.mouse_move(500, 300)
+    await asyncio.sleep(300)  # 5 minutes
     
-    try:
-        # Add frames manually
-        for i in range(100):
-            img = Image.new("RGB", (1920, 1080), color=(i, i, i))
-            await display.add_frame(img)
-        
-        # Save video
-        await display.save_video("custom.ts")
-    finally:
-        await display.stop_encoding()
+    # Stop recording
+    await client.stop_file_recording()
+    await client.stop_streaming()
+```
+
+### Simultaneous Streaming + Recording
+
+Stream live while also saving to file:
+
+```python
+async with RDPClient(host="...", username="...", password="...") as client:
+    # Start both
+    await client.start_streaming()
+    await client.start_file_recording("backup.ts")
+    
+    # Stream to clients
+    async def stream():
+        while client.is_streaming:
+            chunk = await client.display.get_next_video_chunk()
+            if chunk:
+                await broadcast_to_clients(chunk.data)
+    
+    asyncio.create_task(stream())
+    
+    # ... session runs ...
+    
+    # Stop recording, streaming continues
+    await client.stop_file_recording()
 ```
 
 ---
@@ -721,17 +721,19 @@ async def custom_recording():
 
 - Uses `collections.deque` with `maxlen` for O(1) operations
 - Automatically evicts oldest frames when limit reached
-- Default: 300 frames (~10 seconds at 30fps, ~1.5GB for 1080p)
+- Default: `fps * 10` frames (~10 seconds)
+- Uses wall-clock timestamps (`time.time()`) for accurate timing
 
 ### Video Chunk Buffer
 
 - Encoded chunks stored in a deque
 - Automatic eviction when exceeding `max_video_buffer_mb`
-- Default: 100MB buffer cap
+- Default: 100MB buffer cap (~2-5 minutes of video)
 - Oldest chunks evicted first
 
-### Async Queue
+### File Recording
 
-- New video chunks added to an async queue for consumers
-- Back-pressure: drops chunks if queue is full
-- Use `get_next_video_chunk()` for streaming patterns
+- Taps into streaming output (same ffmpeg process)
+- Writes chunks to file AND memory buffer
+- No memory limits - unlimited duration
+- Uses MPEG-TS format for robustness

@@ -207,11 +207,6 @@ class Display:
         return time.time() - self._recording_start_time
 
     @property
-    def is_recording(self) -> bool:
-        """Deprecated: Use is_streaming or is_file_recording instead."""
-        return self._streaming or self._recording_to_file
-
-    @property
     def session_duration_seconds(self) -> float:
         """Return how long since the session started (wall-clock)."""
         return time.time() - self._session_start_time
@@ -465,11 +460,6 @@ class Display:
             logger.error(f"Failed to start file recording: {e}")
             raise
 
-    # Keep start_encoding as alias for backwards compatibility
-    async def start_encoding(self) -> None:
-        """Deprecated: Use start_streaming() instead."""
-        await self.start_streaming()
-
     async def stop_streaming(self) -> None:
         """Stop streaming to memory buffer."""
         if not self._streaming:
@@ -537,14 +527,6 @@ class Display:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
             self._reader_task = None
-
-    # Keep stop_encoding as alias for backwards compatibility
-    async def stop_encoding(self) -> None:
-        """Deprecated: Use stop_streaming() or stop_file_recording() instead."""
-        if self._streaming:
-            await self.stop_streaming()
-        elif self._recording_to_file:
-            await self.stop_file_recording()
 
     async def add_frame(self, image: Image.Image) -> None:
         """
@@ -815,48 +797,6 @@ class Display:
         except Exception as e:
             logger.error(f"Error saving video: {e}")
             return False
-
-    # Deprecated methods for backwards compatibility
-
-    async def save_raw_frames_as_video(self, path: str, use_true_timing: bool = True) -> bool:
-        """Deprecated: Use save_buffer_as_video() instead."""
-        return await self.save_buffer_as_video(path, use_true_timing)
-
-    async def start_recording(self, fps: int | None = None) -> None:
-        """
-        Deprecated: Use start_streaming() or start_file_recording() instead.
-
-        Args:
-            fps: Target frames per second (default: use instance fps).
-        """
-        if fps is not None and fps != self._fps:
-            self._fps = fps
-        await self.start_streaming()
-        logger.info(f"Started video encoding at {self._fps} fps")
-
-    async def stop_recording(self) -> None:
-        """Deprecated: Use stop_streaming() or stop_file_recording() instead."""
-        await self.stop_encoding()
-
-    async def save_recording(self, path: str) -> bool:
-        """
-        Deprecated: Use save_buffer_as_video() instead.
-
-        Args:
-            path: Output file path.
-
-        Returns:
-            True if successful.
-        """
-        if self.is_streaming:
-            await self.stop_streaming()
-
-        # If we have encoded chunks, save those
-        if self.video_buffer_size_mb > 0:
-            return await self.save_video(path)
-
-        # Otherwise, encode raw frames
-        return await self.save_buffer_as_video(path)
 
     def print_stats(self) -> None:
         """Print current statistics."""

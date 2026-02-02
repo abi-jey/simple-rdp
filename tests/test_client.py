@@ -344,40 +344,41 @@ class TestClientDisplay:
         client = RDPClient(host="localhost")
         assert client.display.fps == 30
 
-    def test_is_recording_false_by_default(self):
-        """Test is_recording is False by default."""
+    def test_is_streaming_false_by_default(self):
+        """Test is_streaming is False by default."""
         client = RDPClient(host="localhost")
-        assert client.is_recording is False
+        assert client.is_streaming is False
 
     @pytest.mark.asyncio
     @patch("subprocess.Popen")
-    async def test_start_recording(self, mock_popen):
-        """Test start_recording sets recording flag."""
+    async def test_start_streaming(self, mock_popen):
+        """Test start_streaming sets streaming flag."""
         mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
-        await client.start_recording()
-        assert client.is_recording is True
-        await client.stop_recording()
+        await client.start_streaming()
+        assert client.is_streaming is True
+        await client.stop_streaming()
 
     @pytest.mark.asyncio
     @patch("subprocess.Popen")
-    async def test_stop_recording(self, mock_popen):
-        """Test stop_recording clears recording flag."""
+    async def test_stop_streaming(self, mock_popen):
+        """Test stop_streaming clears streaming flag."""
         mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
-        await client.start_recording()
-        await client.stop_recording()
-        assert client.is_recording is False
+        await client.start_streaming()
+        await client.stop_streaming()
+        assert client.is_streaming is False
 
     @pytest.mark.asyncio
     @patch("subprocess.Popen")
-    async def test_start_recording_with_custom_fps(self, mock_popen):
-        """Test start_recording with custom fps."""
+    async def test_start_file_recording(self, mock_popen):
+        """Test start_file_recording starts both streaming and file recording."""
         mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
-        await client.start_recording(fps=60)
-        assert client.display.fps == 60
-        await client.stop_recording()
+        await client.start_file_recording("/tmp/test.ts")
+        assert client.is_streaming is True
+        assert client.is_file_recording is True
+        await client.stop_streaming()
 
     def test_get_recording_stats(self):
         """Test get_recording_stats returns stats dict."""
@@ -389,11 +390,11 @@ class TestClientDisplay:
 
     @pytest.mark.asyncio
     @patch("subprocess.Popen")
-    async def test_disconnect_stops_recording(self, mock_popen):
-        """Test disconnect stops recording if active."""
+    async def test_disconnect_stops_streaming(self, mock_popen):
+        """Test disconnect stops streaming if active."""
         mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
-        await client.start_recording()
-        assert client.is_recording is True
+        await client.start_streaming()
+        assert client.is_streaming is True
         await client.disconnect()
-        assert client.is_recording is False
+        assert client.is_streaming is False

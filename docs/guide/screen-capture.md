@@ -179,15 +179,16 @@ async def record_session():
     ) as client:
         await asyncio.sleep(2)  # Wait for initial render
         
-        # Start recording (frames captured automatically)
-        await client.start_recording(fps=30)  # (1)!
+        # Start file recording (unlimited duration)
+        await client.start_file_recording("recording.ts")  # (1)!
         
         # Do some actions...
         await client.mouse_move(500, 300)
         await asyncio.sleep(5)  # Record for 5 seconds
         
-        # Save the recording
-        await client.save_video("recording.ts")  # (2)!
+        # Stop recording
+        await client.stop_file_recording()  # (2)!
+        await client.stop_streaming()
         
         # Check stats
         stats = client.get_recording_stats()
@@ -197,19 +198,19 @@ async def record_session():
 asyncio.run(record_session())
 ```
 
-1.  :material-record: Starts ffmpeg encoder, frames captured on each screen update
-2.  :material-content-save: Stops recording and saves to file
+1.  :material-record: Starts ffmpeg encoder, records directly to file
+2.  :material-stop: Stops recording and closes the file
 
-### Manual Recording Control
+### Save Buffer as Video
 
-For more control over the recording process:
+For short clips, save the rolling frame buffer (~10 seconds):
 
 ```python
 import asyncio
 from simple_rdp import RDPClient
 
 
-async def controlled_recording():
+async def save_clip():
     async with RDPClient(
         host="192.168.1.100",
         username="admin",
@@ -217,22 +218,15 @@ async def controlled_recording():
     ) as client:
         await asyncio.sleep(2)
         
-        # Start recording
-        await client.start_recording()
-        print(f"Recording: {client.is_recording}")  # True
+        # Frames are always captured in the background
+        # Wait and then save the last ~10 seconds
+        await asyncio.sleep(15)
         
-        # Perform automation...
-        await asyncio.sleep(10)
-        
-        # Stop recording (optional - save_video does this)
-        await client.stop_recording()
-        print(f"Recording: {client.is_recording}")  # False
-        
-        # Save video
-        await client.save_video("session.ts")
+        # Save buffer as video
+        await client.save_video("clip.mp4")
 
 
-asyncio.run(controlled_recording())
+asyncio.run(save_clip())
 ```
 
 ### Access Display Directly
@@ -243,7 +237,7 @@ For advanced use cases, access the `Display` component directly:
 # Access the integrated Display
 display = client.display
 
-# Get recording statistics
+# Get encoding statistics
 print(f"Frames received: {display.stats['frames_received']}")
 print(f"Buffer size: {display.video_buffer_size_mb:.2f} MB")
 
@@ -254,7 +248,8 @@ if latest:
 
 # Stream video chunks (for WebSocket, etc.)
 async def stream_chunks():
-    while client.is_recording:
+    await client.start_streaming()
+    while client.is_streaming:
         chunk = await display.get_next_video_chunk(timeout=1.0)
         if chunk:
             yield chunk.data

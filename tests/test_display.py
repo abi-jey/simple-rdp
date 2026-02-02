@@ -331,18 +331,18 @@ class TestDisplayEncoding:
     """Tests for Display encoding functionality."""
 
     @pytest.mark.asyncio
-    async def test_stop_encoding_when_not_started(self) -> None:
-        """Test stop_encoding when not started."""
+    async def test_stop_streaming_when_not_started(self) -> None:
+        """Test stop_streaming when not started."""
         display = Display(width=10, height=10)
         # Should not raise
-        await display.stop_encoding()
+        await display.stop_streaming()
         assert display.is_encoding is False
 
     @pytest.mark.asyncio
-    async def test_save_raw_frames_as_video_no_frames(self) -> None:
-        """Test save_raw_frames_as_video with no frames returns False."""
+    async def test_save_buffer_as_video_no_frames(self) -> None:
+        """Test save_buffer_as_video with no frames returns False."""
         display = Display(width=10, height=10)
-        result = await display.save_raw_frames_as_video("/tmp/test_output.mp4")
+        result = await display.save_buffer_as_video("/tmp/test_output.mp4")
         assert result is False
 
     @pytest.mark.asyncio

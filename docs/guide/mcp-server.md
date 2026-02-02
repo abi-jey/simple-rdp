@@ -187,17 +187,25 @@ Send a keyboard key press.
     - A hex scancode (e.g., "0x1C" for Enter)
 - `modifiers`: List of modifier keys to hold: "ctrl", "alt", "shift", "win"
 
-### `rdp_start_recording`
+### `rdp_start_file_recording`
 
-Start recording the session to video. Use this to record specific actions.
-
-### `rdp_stop_recording`
-
-Stop recording and save to file.
+Start recording the session to a file. Recording continues for unlimited duration.
 
 **Parameters:**
 
-- `save_path`: Path to save the recording (e.g., '/tmp/session.mp4')
+- `path`: Path to save the recording (e.g., '/tmp/session.ts')
+
+### `rdp_stop_file_recording`
+
+Stop file recording.
+
+### `rdp_start_streaming`
+
+Start streaming video to memory buffer for real-time consumption.
+
+### `rdp_stop_streaming`
+
+Stop streaming. Also stops any active file recording.
 
 ## Usage with Claude Desktop
 

@@ -233,9 +233,14 @@ class RDPClient:
         return self._capture_fps
 
     @property
-    def is_recording(self) -> bool:
-        """Return whether video recording is currently active."""
-        return self._display.is_recording
+    def is_streaming(self) -> bool:
+        """Return whether video streaming is currently active."""
+        return self._display.is_streaming
+
+    @property
+    def is_file_recording(self) -> bool:
+        """Return whether file recording is currently active."""
+        return self._display.is_file_recording
 
     async def connect(self) -> None:
         """
@@ -298,9 +303,9 @@ class RDPClient:
         """Disconnect from the RDP server."""
         self._running = False
 
-        # Stop recording if active
-        if self._display.is_recording:
-            await self._display.stop_recording()
+        # Stop streaming/recording if active
+        if self._display.is_streaming:
+            await self._display.stop_streaming()
 
         # Stop capture task
         if self._capture_task:
@@ -359,39 +364,61 @@ class RDPClient:
         """
         await self._display.save_screenshot(path)
 
-    # ==================== Video Recording ====================
+    # ==================== Video Streaming & Recording ====================
 
-    async def start_recording(self, fps: int = 30) -> None:
+    async def start_streaming(self) -> None:
         """
-        Start video recording.
+        Start video streaming to memory buffer.
 
-        Frames will be captured automatically as the screen updates.
-        Use `stop_recording()` and `save_video()` to save the recording.
+        Frames are encoded to MPEG-TS chunks that can be consumed via
+        `display.get_next_video_chunk()` for real-time streaming.
+
+        Use `stop_streaming()` to stop encoding.
+        """
+        await self._display.start_streaming()
+
+    async def stop_streaming(self) -> None:
+        """
+        Stop video streaming.
+
+        Also stops any active file recording.
+        """
+        await self._display.stop_streaming()
+
+    async def start_file_recording(self, path: str) -> None:
+        """
+        Start recording video to a file.
+
+        Recording taps into the streaming output - if streaming is not
+        active, it will be started automatically.
 
         Args:
-            fps: Target frames per second for encoding (default: 30).
+            path: Output file path (should use .ts extension for MPEG-TS).
         """
-        await self._display.start_recording(fps)
+        await self._display.start_file_recording(path)
 
-    async def stop_recording(self) -> None:
+    async def stop_file_recording(self) -> None:
         """
-        Stop video recording.
+        Stop file recording.
 
-        After stopping, use `save_video()` to save the recorded video.
+        Streaming continues independently until stop_streaming() is called.
         """
-        await self._display.stop_recording()
+        await self._display.stop_file_recording()
 
     async def save_video(self, path: str) -> bool:
         """
-        Save the recorded video to a file.
+        Save the current video buffer to a file.
+
+        This encodes the raw frame buffer (~10 seconds) to a video file.
+        For full session recording, use start_file_recording() instead.
 
         Args:
-            path: Output file path (e.g., "recording.ts" or "recording.mp4").
+            path: Output file path (e.g., "recording.mp4").
 
         Returns:
             True if successful, False otherwise.
         """
-        return await self._display.save_recording(path)
+        return await self._display.save_buffer_as_video(path)
 
     def get_recording_stats(self) -> dict[str, Any]:
         """

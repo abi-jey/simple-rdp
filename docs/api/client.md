@@ -228,48 +228,86 @@ await client.save_screenshot("screenshot.png")
 def display(self) -> Display
 ```
 
-Access the integrated Display component for video recording.
+Access the integrated Display component for video streaming and recording.
 
 **Returns:** `Display` instance for advanced video operations.
 
-### is_recording
+### is_streaming
 
 ```python
 @property
-def is_recording(self) -> bool
+def is_streaming(self) -> bool
 ```
 
-Whether video recording is currently active.
+Whether video streaming to memory buffer is currently active.
 
-### start_recording
+### is_file_recording
 
 ```python
-async def start_recording(self, fps: int = 30) -> None
+@property
+def is_file_recording(self) -> bool
 ```
 
-Start video recording. Frames are captured automatically on screen updates.
+Whether file recording is currently active.
 
-**Parameters:**
+### start_streaming
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `fps` | `int` | `30` | Target frames per second for encoding |
+```python
+async def start_streaming(self) -> None
+```
+
+Start video streaming to memory buffer. Frames are encoded to MPEG-TS chunks
+that can be consumed via `display.get_next_video_chunk()`.
 
 **Example:**
 
 ```python
-await client.start_recording(fps=30)
-# ... perform actions ...
-await client.save_video("recording.ts")
+await client.start_streaming()
+# Stream chunks to clients
+while client.is_streaming:
+    chunk = await client.display.get_next_video_chunk()
+    if chunk:
+        await send_to_client(chunk.data)
 ```
 
-### stop_recording
+### stop_streaming
 
 ```python
-async def stop_recording(self) -> None
+async def stop_streaming(self) -> None
 ```
 
-Stop video recording. Called automatically by `save_video()`.
+Stop video streaming. Also stops any active file recording.
+
+### start_file_recording
+
+```python
+async def start_file_recording(self, path: str) -> None
+```
+
+Start recording video to a file. If streaming is not active, it will be started automatically.
+Recording taps into the streaming output for unlimited duration without memory limits.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | Output file path (use `.ts` extension for MPEG-TS) |
+
+**Example:**
+
+```python
+await client.start_file_recording("session.ts")
+# ... session runs for any duration ...
+await client.stop_file_recording()
+```
+
+### stop_file_recording
+
+```python
+async def stop_file_recording(self) -> None
+```
+
+Stop file recording. Streaming continues independently.
 
 ### save_video
 
@@ -277,22 +315,23 @@ Stop video recording. Called automatically by `save_video()`.
 async def save_video(self, path: str) -> bool
 ```
 
-Save the recorded video to a file.
+Save the raw frame buffer (~10 seconds) to a video file.
+
+For full session recording, use `start_file_recording()` instead.
 
 **Parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `path` | `str` | Output file path (e.g., `"recording.ts"`) |
+| `path` | `str` | Output file path (e.g., `"clip.mp4"`) |
 
 **Returns:** `True` if successful, `False` otherwise.
 
 **Example:**
 
 ```python
-await client.start_recording()
-await asyncio.sleep(10)  # Record for 10 seconds
-success = await client.save_video("session.ts")
+# Save the last ~10 seconds of frames
+success = await client.save_video("clip.mp4")
 ```
 
 ### get_recording_stats
@@ -301,7 +340,7 @@ success = await client.save_video("session.ts")
 def get_recording_stats(self) -> dict[str, Any]
 ```
 
-Get video recording statistics.
+Get video encoding statistics.
 
 **Returns:** Dictionary with:
 
