@@ -92,6 +92,7 @@ class RDPClient:
         height: int = 1080,
         color_depth: int = 32,
         show_wallpaper: bool = False,
+        capture_fps: int = 30,
     ) -> None:
         """
         Initialize the RDP client.
@@ -106,6 +107,7 @@ class RDPClient:
             height: Desktop height in pixels.
             color_depth: Color depth in bits per pixel.
             show_wallpaper: Whether to show desktop wallpaper (default: False for performance).
+            capture_fps: Frame capture rate for the display buffer (default: 30).
         """
         self._host = host
         self._port = port
@@ -141,13 +143,17 @@ class RDPClient:
 
         # Receive loop task
         self._receive_task: asyncio.Task[None] | None = None
+        self._capture_task: asyncio.Task[None] | None = None
         self._running = False
+
+        # Capture settings
+        self._capture_fps = capture_fps
 
         # Display component - handles screen capture and video recording
         self._display = Display(
             width=self._width,
             height=self._height,
-            fps=30,
+            fps=capture_fps,
         )
 
     @property
@@ -222,6 +228,11 @@ class RDPClient:
         return self._display
 
     @property
+    def capture_fps(self) -> int:
+        """Return the frame capture rate."""
+        return self._capture_fps
+
+    @property
     def is_recording(self) -> bool:
         """Return whether video recording is currently active."""
         return self._display.is_recording
@@ -272,9 +283,10 @@ class RDPClient:
         # Initialize Display screen buffer
         self._display.initialize_screen()
 
-        # Start receive loop
+        # Start receive loop and capture loop
         self._running = True
         self._receive_task = asyncio.create_task(self._receive_loop())
+        self._capture_task = asyncio.create_task(self._capture_loop())
 
         # Request initial screen content
         await self._request_screen_refresh()
@@ -289,6 +301,12 @@ class RDPClient:
         # Stop recording if active
         if self._display.is_recording:
             await self._display.stop_recording()
+
+        # Stop capture task
+        if self._capture_task:
+            self._capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._capture_task
 
         if self._receive_task:
             self._receive_task.cancel()
@@ -991,6 +1009,34 @@ class RDPClient:
         share_control = self._build_share_control_pdu(PDUTYPE_DATAPDU, share_data)
         await self._send_mcs_data(share_control, self._io_channel_id)
         logger.debug("Sent Refresh Rect PDU for full screen")
+
+    # ==================== Capture Loop ====================
+
+    async def _capture_loop(self) -> None:
+        """Background loop to capture frames at fixed rate into the display buffer."""
+        interval = 1.0 / self._capture_fps
+        logger.info(f"Starting capture loop at {self._capture_fps} FPS (interval: {interval * 1000:.1f}ms)")
+
+        while self._running:
+            try:
+                start = asyncio.get_event_loop().time()
+
+                # Capture current screen buffer to raw frames
+                if self._display._screen_buffer is not None:
+                    await self._display.add_frame(self._display._screen_buffer)
+
+                # Sleep for remainder of interval
+                elapsed = asyncio.get_event_loop().time() - start
+                sleep_time = max(0, interval - elapsed)
+                await asyncio.sleep(sleep_time)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error in capture loop: {e}")
+                await asyncio.sleep(interval)
+
+        logger.info("Capture loop stopped")
 
     # ==================== Receive Loop ====================
 

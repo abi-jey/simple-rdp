@@ -317,22 +317,11 @@ class Display:
                 self._screen_buffer.paste(img, (x, y))
                 self._stats["bitmaps_applied"] += 1
 
-                # If recording, capture frame
-                if self._recording:
-                    await self._capture_frame_for_recording()
+                # Note: Raw frame capture is handled by RDPClient's capture loop at fixed FPS
+                # If encoding is active, frames are sent to ffmpeg in add_frame()
 
             except Exception as e:
                 logger.debug(f"Error applying bitmap: {e}")
-
-    async def _capture_frame_for_recording(self) -> None:
-        """Capture current screen buffer as a frame for video recording."""
-        if self._screen_buffer is None:
-            return
-
-        try:
-            await self.add_frame(self._screen_buffer)
-        except Exception as e:
-            logger.debug(f"Error capturing frame for recording: {e}")
 
     async def start_encoding(self) -> None:
         """Start the ffmpeg encoding process for video recording."""
