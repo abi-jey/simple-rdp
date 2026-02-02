@@ -93,6 +93,7 @@ nav:
       - Automation Scripts: examples/automation.md
   - API Reference:
       - RDPClient: api/client.md
+      - Display: api/display.md
       - Input Types: api/input.md
   - Development:
       - Contributing: development/contributing.md

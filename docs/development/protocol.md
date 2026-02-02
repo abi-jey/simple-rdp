@@ -183,5 +183,5 @@ The following features are not implemented (not needed for automation):
 | `credssp.py` | CredSSP/NLA authentication |
 | `capabilities.py` | Capability set negotiation |
 | `rle.py` | RLE bitmap decompression |
-| `screen.py` | Display utilities, video encoding |
+| `display.py` | Display class, video encoding |
 | `input.py` | Input event types |

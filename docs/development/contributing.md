@@ -97,7 +97,7 @@ poetry run ruff format src/
     │   ├── mcs.py           # MCS/T.125 protocol layer
     │   ├── pdu.py           # RDP PDU encoding/decoding
     │   ├── rle.py           # RLE bitmap decompression
-    │   ├── screen.py        # Display/video utilities
+    │   ├── display.py       # Display/video encoding
     │   └── input.py         # Input type definitions
     ├── tests/
     │   ├── test_*.py        # Unit tests
