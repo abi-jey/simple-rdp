@@ -1,5 +1,8 @@
 """Tests for RDP Client."""
 
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
 import pytest
 
 from simple_rdp.client import IO_CHANNEL_ID
@@ -347,24 +350,30 @@ class TestClientDisplay:
         assert client.is_recording is False
 
     @pytest.mark.asyncio
-    async def test_start_recording(self):
+    @patch("subprocess.Popen")
+    async def test_start_recording(self, mock_popen):
         """Test start_recording sets recording flag."""
+        mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
         await client.start_recording()
         assert client.is_recording is True
         await client.stop_recording()
 
     @pytest.mark.asyncio
-    async def test_stop_recording(self):
+    @patch("subprocess.Popen")
+    async def test_stop_recording(self, mock_popen):
         """Test stop_recording clears recording flag."""
+        mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
         await client.start_recording()
         await client.stop_recording()
         assert client.is_recording is False
 
     @pytest.mark.asyncio
-    async def test_start_recording_with_custom_fps(self):
+    @patch("subprocess.Popen")
+    async def test_start_recording_with_custom_fps(self, mock_popen):
         """Test start_recording with custom fps."""
+        mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
         await client.start_recording(fps=60)
         assert client.display.fps == 60
@@ -379,8 +388,10 @@ class TestClientDisplay:
         assert "encoding_errors" in stats
 
     @pytest.mark.asyncio
-    async def test_disconnect_stops_recording(self):
+    @patch("subprocess.Popen")
+    async def test_disconnect_stops_recording(self, mock_popen):
         """Test disconnect stops recording if active."""
+        mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
         await client.start_recording()
         assert client.is_recording is True
