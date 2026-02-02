@@ -317,3 +317,71 @@ class TestClientDisconnect:
         await client.disconnect()
         await client.disconnect()
         assert client.is_connected is False
+
+
+class TestClientDisplay:
+    """Tests for client Display integration."""
+
+    def test_display_property(self):
+        """Test display property returns Display instance."""
+        from simple_rdp.display import Display
+
+        client = RDPClient(host="localhost")
+        assert isinstance(client.display, Display)
+
+    def test_display_dimensions_match(self):
+        """Test display dimensions match client dimensions."""
+        client = RDPClient(host="localhost", width=1280, height=720)
+        assert client.display.width == 1280
+        assert client.display.height == 720
+
+    def test_display_default_fps(self):
+        """Test display has default 30 fps."""
+        client = RDPClient(host="localhost")
+        assert client.display.fps == 30
+
+    def test_is_recording_false_by_default(self):
+        """Test is_recording is False by default."""
+        client = RDPClient(host="localhost")
+        assert client.is_recording is False
+
+    @pytest.mark.asyncio
+    async def test_start_recording(self):
+        """Test start_recording sets recording flag."""
+        client = RDPClient(host="localhost")
+        await client.start_recording()
+        assert client.is_recording is True
+        await client.stop_recording()
+
+    @pytest.mark.asyncio
+    async def test_stop_recording(self):
+        """Test stop_recording clears recording flag."""
+        client = RDPClient(host="localhost")
+        await client.start_recording()
+        await client.stop_recording()
+        assert client.is_recording is False
+
+    @pytest.mark.asyncio
+    async def test_start_recording_with_custom_fps(self):
+        """Test start_recording with custom fps."""
+        client = RDPClient(host="localhost")
+        await client.start_recording(fps=60)
+        assert client.display.fps == 60
+        await client.stop_recording()
+
+    def test_get_recording_stats(self):
+        """Test get_recording_stats returns stats dict."""
+        client = RDPClient(host="localhost")
+        stats = client.get_recording_stats()
+        assert "frames_received" in stats
+        assert "frames_encoded" in stats
+        assert "encoding_errors" in stats
+
+    @pytest.mark.asyncio
+    async def test_disconnect_stops_recording(self):
+        """Test disconnect stops recording if active."""
+        client = RDPClient(host="localhost")
+        await client.start_recording()
+        assert client.is_recording is True
+        await client.disconnect()
+        assert client.is_recording is False

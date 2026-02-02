@@ -160,24 +160,18 @@ arr = np.array(img)
 
 ---
 
-## Video Recording with Display
+## Video Recording
 
-For video recording and streaming, use the `Display` class which provides:
-
-- :material-video: Live H.264 encoding via ffmpeg
-- :material-database: Raw frame buffer with automatic eviction
-- :material-play-box-multiple: Async video chunk queue for streaming
+The `RDPClient` has an integrated `Display` component for video recording. Frames are automatically captured as the screen updates.
 
 ### Basic Video Recording
 
 ```python
 import asyncio
-from simple_rdp import RDPClient, Display
+from simple_rdp import RDPClient
 
 
 async def record_session():
-    display = Display(width=1920, height=1080, fps=30)
-    
     async with RDPClient(
         host="192.168.1.100",
         username="admin",
@@ -185,74 +179,86 @@ async def record_session():
     ) as client:
         await asyncio.sleep(2)  # Wait for initial render
         
-        # Record 300 frames (~10 seconds at 30fps)
-        for _ in range(300):
-            img = await client.screenshot()
-            await display.add_frame(img)  # (1)!
-            await asyncio.sleep(1/30)
+        # Start recording (frames captured automatically)
+        await client.start_recording(fps=30)  # (1)!
         
-        # Save as video file
-        await display.save_raw_frames_as_video("recording.mp4")  # (2)!
-        display.print_stats()
+        # Do some actions...
+        await client.mouse_move(500, 300)
+        await asyncio.sleep(5)  # Record for 5 seconds
+        
+        # Save the recording
+        await client.save_video("recording.ts")  # (2)!
+        
+        # Check stats
+        stats = client.get_recording_stats()
+        print(f"Frames: {stats['frames_encoded']}")
 
 
 asyncio.run(record_session())
 ```
 
-1.  :material-image-plus: Adds frame to buffer (no encoding yet)
-2.  :material-movie-open: Encodes all buffered frames to video
+1.  :material-record: Starts ffmpeg encoder, frames captured on each screen update
+2.  :material-content-save: Stops recording and saves to file
 
-### Live Video Streaming
+### Manual Recording Control
 
-For real-time encoding and streaming:
+For more control over the recording process:
 
 ```python
 import asyncio
-from simple_rdp import RDPClient, Display
+from simple_rdp import RDPClient
 
 
-async def stream_rdp():
-    display = Display(width=1920, height=1080, fps=30)
-    
+async def controlled_recording():
     async with RDPClient(
         host="192.168.1.100",
         username="admin",
         password="secret",
     ) as client:
-        await display.start_encoding()  # (1)!
+        await asyncio.sleep(2)
         
-        try:
-            # Capture and encode loop
-            for _ in range(300):
-                img = await client.screenshot()
-                await display.add_frame(img)  # (2)!
-                await asyncio.sleep(1/30)
-            
-            # Save encoded video
-            await display.save_video("stream.ts")  # (3)!
-        finally:
-            await display.stop_encoding()
+        # Start recording
+        await client.start_recording()
+        print(f"Recording: {client.is_recording}")  # True
+        
+        # Perform automation...
+        await asyncio.sleep(10)
+        
+        # Stop recording (optional - save_video does this)
+        await client.stop_recording()
+        print(f"Recording: {client.is_recording}")  # False
+        
+        # Save video
+        await client.save_video("session.ts")
 
 
-asyncio.run(stream_rdp())
+asyncio.run(controlled_recording())
 ```
 
-1.  :material-play: Starts ffmpeg subprocess for live encoding
-2.  :material-export: Frame is immediately encoded to H.264
-3.  :material-content-save: Saves buffered MPEG-TS chunks
+### Access Display Directly
 
-### Streaming Video Chunks
-
-Get encoded chunks for network streaming:
+For advanced use cases, access the `Display` component directly:
 
 ```python
-async def get_video_stream(display: Display):
-    while True:
+# Access the integrated Display
+display = client.display
+
+# Get recording statistics
+print(f"Frames received: {display.stats['frames_received']}")
+print(f"Buffer size: {display.video_buffer_size_mb:.2f} MB")
+
+# Get latest frame as ScreenBuffer
+latest = display.get_latest_frame()
+if latest:
+    print(f"Frame size: {latest.width}x{latest.height}")
+
+# Stream video chunks (for WebSocket, etc.)
+async def stream_chunks():
+    while client.is_recording:
         chunk = await display.get_next_video_chunk(timeout=1.0)
         if chunk:
-            # Send to WebSocket, HTTP stream, etc.
             yield chunk.data
 ```
 
 !!! tip "See Also"
-    For complete API reference, see [Display API](../api/display.md).
+    For complete Display API reference, see [Display API](../api/display.md).

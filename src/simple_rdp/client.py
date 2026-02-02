@@ -22,6 +22,7 @@ from simple_rdp.credssp import build_ts_request
 from simple_rdp.credssp import build_ts_request_with_credentials
 from simple_rdp.credssp import build_ts_request_with_pub_key_auth
 from simple_rdp.credssp import parse_ts_request
+from simple_rdp.display import Display
 from simple_rdp.mcs import build_client_cluster_data
 from simple_rdp.mcs import build_client_core_data
 from simple_rdp.mcs import build_client_network_data
@@ -146,6 +147,14 @@ class RDPClient:
         self._receive_task: asyncio.Task[None] | None = None
         self._running = False
 
+        # Display/video recording - integrated component
+        self._display = Display(
+            width=self._width,
+            height=self._height,
+            fps=30,
+        )
+        self._recording = False
+
     @property
     def _reader(self) -> StreamReader:
         """Return the TCP reader, asserting it exists."""
@@ -204,6 +213,21 @@ class RDPClient:
     def pointer_hotspot(self) -> tuple[int, int]:
         """Return the pointer hotspot offset (x, y)."""
         return self._pointer_hotspot
+
+    @property
+    def display(self) -> Display:
+        """
+        Return the Display component for video recording.
+
+        The Display captures screen frames and can encode them to video.
+        Use `start_recording()` and `stop_recording()` for video capture.
+        """
+        return self._display
+
+    @property
+    def is_recording(self) -> bool:
+        """Return whether video recording is currently active."""
+        return self._recording
 
     async def connect(self) -> None:
         """
@@ -265,6 +289,10 @@ class RDPClient:
         """Disconnect from the RDP server."""
         self._running = False
 
+        # Stop recording if active
+        if self._recording:
+            await self.stop_recording()
+
         if self._receive_task:
             self._receive_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -320,6 +348,77 @@ class RDPClient:
         img = await self.screenshot()
         img.save(path)
         logger.info(f"Screenshot saved to {path}")
+
+    # ==================== Video Recording ====================
+
+    async def start_recording(self, fps: int = 30) -> None:
+        """
+        Start video recording.
+
+        Frames will be captured automatically as the screen updates.
+        Use `stop_recording()` and `save_video()` to save the recording.
+
+        Args:
+            fps: Target frames per second for encoding (default: 30).
+        """
+        if self._recording:
+            logger.warning("Recording already active")
+            return
+
+        # Update display fps if different
+        if fps != self._display.fps:
+            self._display = Display(
+                width=self._width,
+                height=self._height,
+                fps=fps,
+            )
+
+        await self._display.start_encoding()
+        self._recording = True
+        logger.info(f"Started video recording at {fps} fps")
+
+    async def stop_recording(self) -> None:
+        """
+        Stop video recording.
+
+        After stopping, use `save_video()` to save the recorded video.
+        """
+        if not self._recording:
+            return
+
+        await self._display.stop_encoding()
+        self._recording = False
+        logger.info("Stopped video recording")
+
+    async def save_video(self, path: str) -> bool:
+        """
+        Save the recorded video to a file.
+
+        Args:
+            path: Output file path (e.g., "recording.ts" or "recording.mp4").
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        if self._recording:
+            await self.stop_recording()
+
+        # If we have encoded chunks, save those
+        if self._display.video_buffer_size_mb > 0:
+            return await self._display.save_video(path)
+
+        # Otherwise, encode raw frames
+        return await self._display.save_raw_frames_as_video(path)
+
+    def get_recording_stats(self) -> dict[str, Any]:
+        """
+        Get video recording statistics.
+
+        Returns:
+            Dictionary with recording stats including frames received,
+            frames encoded, buffer sizes, and errors.
+        """
+        return self._display.stats
 
     # ==================== Input Methods ====================
 
@@ -1257,6 +1356,13 @@ class RDPClient:
                     await self._apply_bitmap(bitmap)
                 except Exception as e:
                     logger.debug(f"Error applying bitmap: {e}")
+
+            # Feed frame to Display if recording
+            if self._recording and self._screen_buffer is not None:
+                try:
+                    await self._display.add_frame(self._screen_buffer)
+                except Exception as e:
+                    logger.debug(f"Error adding frame to display: {e}")
 
     async def _apply_bitmap(self, bitmap: dict[str, Any]) -> None:
         """Apply a bitmap update to the screen buffer."""

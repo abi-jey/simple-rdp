@@ -219,6 +219,100 @@ await client.save_screenshot("screenshot.png")
 
 ---
 
+## Video Recording Methods
+
+### display
+
+```python
+@property
+def display(self) -> Display
+```
+
+Access the integrated Display component for video recording.
+
+**Returns:** `Display` instance for advanced video operations.
+
+### is_recording
+
+```python
+@property
+def is_recording(self) -> bool
+```
+
+Whether video recording is currently active.
+
+### start_recording
+
+```python
+async def start_recording(self, fps: int = 30) -> None
+```
+
+Start video recording. Frames are captured automatically on screen updates.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fps` | `int` | `30` | Target frames per second for encoding |
+
+**Example:**
+
+```python
+await client.start_recording(fps=30)
+# ... perform actions ...
+await client.save_video("recording.ts")
+```
+
+### stop_recording
+
+```python
+async def stop_recording(self) -> None
+```
+
+Stop video recording. Called automatically by `save_video()`.
+
+### save_video
+
+```python
+async def save_video(self, path: str) -> bool
+```
+
+Save the recorded video to a file.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str` | Output file path (e.g., `"recording.ts"`) |
+
+**Returns:** `True` if successful, `False` otherwise.
+
+**Example:**
+
+```python
+await client.start_recording()
+await asyncio.sleep(10)  # Record for 10 seconds
+success = await client.save_video("session.ts")
+```
+
+### get_recording_stats
+
+```python
+def get_recording_stats(self) -> dict[str, Any]
+```
+
+Get video recording statistics.
+
+**Returns:** Dictionary with:
+
+- `frames_received` - Total frames added
+- `frames_encoded` - Frames sent to encoder
+- `bytes_encoded` - Total encoded bytes
+- `chunks_evicted` - Chunks removed due to buffer limit
+- `encoding_errors` - Number of encoding errors
+
+---
+
 ## Keyboard Methods
 
 ### send_key

@@ -2,6 +2,12 @@
 
 The `Display` class provides video encoding and frame buffering capabilities using ffmpeg.
 
+!!! info "Integrated with RDPClient"
+    The `Display` is automatically integrated into `RDPClient`. Access it via `client.display` 
+    or use the convenience methods `client.start_recording()`, `client.save_video()`, etc.
+    
+    For most use cases, you don't need to interact with Display directly.
+
 ## Overview
 
 The Display class manages:
@@ -10,6 +16,27 @@ The Display class manages:
 - **Live video encoding** - Real-time H.264 encoding via ffmpeg subprocess  
 - **Video buffering** - Async queue with configurable size limits
 - **Frame eviction** - Automatic cleanup when buffers exceed limits
+
+---
+
+## Quick Start
+
+```python
+from simple_rdp import RDPClient
+
+async with RDPClient(host="...", username="...", password="...") as client:
+    # Start recording (Display is used internally)
+    await client.start_recording()
+    
+    # ... perform actions ...
+    
+    # Save video
+    await client.save_video("recording.ts")
+    
+    # Access Display for advanced operations
+    display = client.display
+    print(f"Frames: {display.stats['frames_encoded']}")
+```
 
 ---
 
@@ -486,72 +513,96 @@ Print current statistics to stdout.
 
 ## Usage Patterns
 
+### Integrated Recording (Recommended)
+
+Use the RDPClient's built-in recording methods:
+
+```python
+import asyncio
+from simple_rdp import RDPClient
+
+
+async def record_session(host: str, username: str, password: str):
+    async with RDPClient(
+        host=host,
+        username=username,
+        password=password,
+    ) as client:
+        await asyncio.sleep(2)  # Wait for initial render
+        
+        # Start recording - frames captured automatically
+        await client.start_recording(fps=30)
+        
+        # Perform automation...
+        await client.mouse_move(500, 300)
+        await asyncio.sleep(10)
+        
+        # Save video
+        await client.save_video("session.ts")
+        
+        # Check stats via display
+        client.display.print_stats()
+```
+
 ### Live Video Streaming
 
 Stream encoded video chunks in real-time:
 
 ```python
 import asyncio
-from simple_rdp import RDPClient, Display
+from simple_rdp import RDPClient
 
 
 async def stream_rdp(host: str, username: str, password: str):
-    display = Display(width=1920, height=1080, fps=30)
-    
     async with RDPClient(
         host=host,
         username=username,
         password=password,
     ) as client:
-        await display.start_encoding()
+        await asyncio.sleep(2)
         
-        try:
-            # Capture loop
-            async def capture():
-                while True:
-                    img = await client.screenshot()
-                    await display.add_frame(img)
-                    await asyncio.sleep(1/30)  # 30 FPS
-            
-            # Stream loop
-            async def stream():
-                while True:
-                    chunk = await display.get_next_video_chunk()
-                    if chunk:
-                        yield chunk.data  # Send to client
-            
-            # Run both concurrently
-            await asyncio.gather(capture(), stream())
-        finally:
-            await display.stop_encoding()
+        # Start recording
+        await client.start_recording(fps=30)
+        
+        # Stream chunks via Display
+        display = client.display
+        
+        async def stream_chunks():
+            while client.is_recording:
+                chunk = await display.get_next_video_chunk(timeout=1.0)
+                if chunk:
+                    # Send to WebSocket, HTTP stream, etc.
+                    yield chunk.data
+        
+        # Use the stream...
+        async for data in stream_chunks():
+            await send_to_client(data)
 ```
 
-### Batch Recording
+### Standalone Display (Advanced)
 
-Record frames and encode later:
+For custom use cases, use Display directly:
 
 ```python
-from simple_rdp import RDPClient, Display
+from simple_rdp import Display
+from PIL import Image
 
 
-async def record_session(host: str, username: str, password: str):
-    display = Display(width=1920, height=1080, max_raw_frames=1000)
+async def custom_recording():
+    display = Display(width=1920, height=1080, fps=30)
     
-    async with RDPClient(
-        host=host,
-        username=username,
-        password=password,
-    ) as client:
-        # Capture frames
-        for _ in range(300):  # 10 seconds at 30fps
-            img = await client.screenshot()
+    await display.start_encoding()
+    
+    try:
+        # Add frames manually
+        for i in range(100):
+            img = Image.new("RGB", (1920, 1080), color=(i, i, i))
             await display.add_frame(img)
-            await asyncio.sleep(1/30)
         
-        # Encode to video file
-        await display.save_raw_frames_as_video("session.mp4", fps=30)
-        
-        display.print_stats()
+        # Save video
+        await display.save_video("custom.ts")
+    finally:
+        await display.stop_encoding()
 ```
 
 ---
