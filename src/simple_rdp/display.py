@@ -20,6 +20,7 @@ from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
 from logging import getLogger
+from typing import IO
 
 from PIL import Image
 
@@ -110,8 +111,9 @@ class Display:
         self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._streaming = False  # Encoding to memory buffer for streaming
-        self._recording_to_file = False  # Recording directly to file
+        self._recording_to_file = False  # Recording taps into streaming output
         self._recording_path: str | None = None  # Path for file recording
+        self._recording_file: IO[bytes] | None = None  # File handle for recording
 
         # Video output buffer (chunked encoded video for streaming)
         self._video_chunks: deque[VideoChunk] = deque()
@@ -428,61 +430,40 @@ class Display:
 
     async def start_file_recording(self, path: str) -> None:
         """
-        Start recording video directly to a file.
+        Start recording video to a file.
 
-        This writes frames directly to the output file (not to memory buffer).
-        Use this for full session recording without memory limits.
+        Recording taps into the streaming output - chunks are written to both
+        the memory buffer and the file. If streaming is not active, it will
+        be started automatically.
+
+        This allows unlimited recording duration (no memory limits) while
+        optionally also streaming chunks for live consumption.
 
         Args:
             path: Output file path (e.g., "recording.mp4").
+                  Should use .ts extension for MPEG-TS format.
 
-        For streaming to memory buffer, use start_streaming() instead.
+        Note:
+            Recording uses the same MPEG-TS format as streaming.
+            For MP4, use save_buffer_as_video() after stopping.
         """
-        if self._streaming or self._recording_to_file:
-            logger.warning("Encoding already active")
+        if self._recording_to_file:
+            logger.warning("File recording already active")
             return
 
-        self._recording_to_file = True
-        self._recording_path = path
-        self._recording_start_time = time.time()
-        self._first_frame_time = None
+        # Start streaming if not already active (we tap into its output)
+        if not self._streaming:
+            await self.start_streaming()
 
-        # Start ffmpeg process - output directly to file
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-s",
-            f"{self._width}x{self._height}",
-            "-r",
-            str(self._fps),
-            "-i",
-            "pipe:0",  # stdin
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",  # Better quality for file recording
-            "-pix_fmt",
-            "yuv420p",
-            "-crf",
-            "23",
-            path,  # Output directly to file
-        ]
-
-        logger.info(f"Starting file recording to {path}: {self._width}x{self._height} @ {self._fps}fps")
-
-        self._ffmpeg_process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
-        )
-
-        logger.info(f"File recording started: {path}")
+        # Open file for writing
+        try:
+            self._recording_file = open(path, "wb")
+            self._recording_to_file = True
+            self._recording_path = path
+            logger.info(f"File recording started: {path}")
+        except Exception as e:
+            logger.error(f"Failed to start file recording: {e}")
+            raise
 
     # Keep start_encoding as alias for backwards compatibility
     async def start_encoding(self) -> None:
@@ -499,19 +480,41 @@ class Display:
         logger.info("Streaming stopped")
 
     async def stop_file_recording(self) -> None:
-        """Stop file recording."""
+        """Stop file recording.
+
+        This closes the recording file but does NOT stop streaming.
+        Streaming continues independently until stop_streaming() is called.
+        """
         if not self._recording_to_file:
             return
 
         path = self._recording_path
         self._recording_to_file = False
         self._recording_path = None
-        await self._stop_ffmpeg()
+
+        # Close the recording file
+        if self._recording_file:
+            try:
+                self._recording_file.close()
+            except Exception as e:
+                logger.debug(f"Error closing recording file: {e}")
+            self._recording_file = None
+
         logger.info(f"File recording stopped: {path}")
 
     async def _stop_ffmpeg(self) -> None:
-        """Internal: stop the ffmpeg process."""
+        """Internal: stop the ffmpeg process and close any open recording file."""
         self._recording_start_time = None
+
+        # Close recording file if open
+        if self._recording_file:
+            try:
+                self._recording_file.close()
+            except Exception as e:
+                logger.debug(f"Error closing recording file: {e}")
+            self._recording_file = None
+            self._recording_to_file = False
+            self._recording_path = None
 
         if self._ffmpeg_process:
             # Close stdin to signal EOF
@@ -598,7 +601,7 @@ class Display:
                 logger.debug(f"Error writing to ffmpeg: {e}")
 
     async def _read_video_output(self) -> None:
-        """Read encoded video from ffmpeg stdout and buffer it (streaming mode only)."""
+        """Read encoded video from ffmpeg stdout, buffer it, and write to file if recording."""
         CHUNK_SIZE = 65536  # 64KB chunks
 
         while self._streaming and self._ffmpeg_process:
@@ -615,6 +618,14 @@ class Display:
                 if not data:
                     await asyncio.sleep(0.01)
                     continue
+
+                # Write to file if recording is active
+                if self._recording_to_file and self._recording_file:
+                    try:
+                        self._recording_file.write(data)
+                        self._recording_file.flush()
+                    except Exception as e:
+                        logger.debug(f"Error writing to recording file: {e}")
 
                 # Create chunk
                 chunk = VideoChunk(
