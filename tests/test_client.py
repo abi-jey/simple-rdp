@@ -1,5 +1,6 @@
 """Tests for RDP Client."""
 
+import tempfile
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -375,7 +376,10 @@ class TestClientDisplay:
         """Test start_file_recording starts both streaming and file recording."""
         mock_popen.return_value = MagicMock()
         client = RDPClient(host="localhost")
-        await client.start_file_recording("/tmp/test.ts")
+        # Use tempfile for cross-platform temp path
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            temp_path = f.name
+        await client.start_file_recording(temp_path)
         assert client.is_streaming is True
         assert client.is_file_recording is True
         await client.stop_streaming()
