@@ -164,8 +164,8 @@ async def test_with_encoding(
     tracemalloc.start()
     memory_start = tracemalloc.get_traced_memory()[0] / (1024 * 1024)
 
-    # Start encoding
-    await display.start_encoding()
+    # Start streaming
+    await display.start_streaming()
 
     target_interval = 1.0 / target_fps
     frames = 0
@@ -208,8 +208,8 @@ async def test_with_encoding(
 
         end_time = time.perf_counter()
 
-        # Stop encoding
-        await display.stop_encoding()
+        # Stop streaming
+        await display.stop_streaming()
 
         memory_end, memory_peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -229,7 +229,7 @@ async def test_with_encoding(
         )
 
     except Exception as e:
-        await display.stop_encoding()
+        await display.stop_streaming()
         tracemalloc.stop()
         return FPSTestResult(
             target_fps=target_fps,

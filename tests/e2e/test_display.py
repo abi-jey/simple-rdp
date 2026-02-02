@@ -236,9 +236,9 @@ async def run_test(session_dir: str, duration: int, target_fps: int):
         print("Connected! Waiting for initial screen...")
         await asyncio.sleep(2)
 
-        # Start ffmpeg encoding
-        print(f"\nStarting ffmpeg live encoding at {target_fps} FPS...")
-        await display.start_encoding()
+        # Start ffmpeg streaming
+        print(f"\nStarting ffmpeg live streaming at {target_fps} FPS...")
+        await display.start_streaming()
 
         # Start capture
         print(f"Starting {target_fps} FPS capture with raw frames...")
@@ -256,8 +256,8 @@ async def run_test(session_dir: str, duration: int, target_fps: int):
         await capture_task
         tracker.end_time = time.perf_counter()
 
-        # Stop encoding
-        await display.stop_encoding()
+        # Stop streaming
+        await display.stop_streaming()
 
         print(f"\nCapture complete: {display.frame_count} frames in {tracker.duration:.1f}s")
         print(f"Actual FPS: {display.frame_count / tracker.duration:.2f}")
@@ -270,7 +270,7 @@ async def run_test(session_dir: str, duration: int, target_fps: int):
         stop_capture.set()
         tracker.end_time = time.perf_counter()
     finally:
-        await display.stop_encoding()
+        await display.stop_streaming()
         await client.disconnect()
 
     return display, tracker
