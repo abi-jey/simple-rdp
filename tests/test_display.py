@@ -483,6 +483,20 @@ class TestDisplayConstants:
         """Test default max video buffer constant."""
         assert Display.DEFAULT_MAX_VIDEO_BUFFER_MB == 100
 
-    def test_default_max_raw_frames(self) -> None:
-        """Test default max raw frames constant."""
-        assert Display.DEFAULT_MAX_RAW_FRAMES == 300
+    def test_default_raw_buffer_seconds(self) -> None:
+        """Test default raw buffer seconds constant."""
+        assert Display.DEFAULT_RAW_BUFFER_SECONDS == 10
+
+    def test_max_raw_frames_based_on_fps(self) -> None:
+        """Test that max_raw_frames defaults to fps * 10."""
+        display_30fps = Display(fps=30)
+        assert display_30fps.max_raw_frames == 300  # 30 * 10
+
+        display_60fps = Display(fps=60)
+        assert display_60fps.max_raw_frames == 600  # 60 * 10
+
+    def test_raw_buffer_seconds_properties(self) -> None:
+        """Test raw buffer seconds properties."""
+        display = Display(fps=30)
+        assert display.max_raw_buffer_seconds == 10.0
+        assert display.raw_buffer_seconds == 0.0  # no frames yet

@@ -70,7 +70,7 @@ class Display:
 
     # Default buffer limits
     DEFAULT_MAX_VIDEO_BUFFER_MB = 100
-    DEFAULT_MAX_RAW_FRAMES = 300  # ~3 seconds at 100fps, ~1.5GB for 1080p
+    DEFAULT_RAW_BUFFER_SECONDS = 10  # Keep ~10 seconds of raw frames
 
     def __init__(
         self,
@@ -78,7 +78,7 @@ class Display:
         height: int = 1080,
         fps: int = 30,
         max_video_buffer_mb: float = DEFAULT_MAX_VIDEO_BUFFER_MB,
-        max_raw_frames: int = DEFAULT_MAX_RAW_FRAMES,
+        max_raw_frames: int | None = None,
     ) -> None:
         """
         Initialize the display manager.
@@ -88,13 +88,14 @@ class Display:
             height: Frame height in pixels.
             fps: Target frames per second for video encoding.
             max_video_buffer_mb: Maximum video buffer size in MB before eviction.
-            max_raw_frames: Maximum number of raw frames to keep in memory.
+            max_raw_frames: Maximum raw frames to buffer. Defaults to fps * 10 (~10 seconds).
         """
         self._width = width
         self._height = height
         self._fps = fps
         self._max_video_buffer_bytes = int(max_video_buffer_mb * 1024 * 1024)
-        self._max_raw_frames = max_raw_frames
+        # Default to ~10 seconds of buffer based on fps
+        self._max_raw_frames = max_raw_frames if max_raw_frames is not None else fps * self.DEFAULT_RAW_BUFFER_SECONDS
 
         # Screen buffer - the current screen state as a PIL Image
         self._screen_buffer: Image.Image | None = None
@@ -154,6 +155,21 @@ class Display:
     @property
     def raw_frame_count(self) -> int:
         return len(self._raw_frames)
+
+    @property
+    def max_raw_frames(self) -> int:
+        """Maximum number of raw frames that can be buffered."""
+        return self._max_raw_frames
+
+    @property
+    def raw_buffer_seconds(self) -> float:
+        """Current raw frame buffer size in seconds (based on fps)."""
+        return len(self._raw_frames) / self._fps if self._fps > 0 else 0.0
+
+    @property
+    def max_raw_buffer_seconds(self) -> float:
+        """Maximum raw frame buffer size in seconds."""
+        return self._max_raw_frames / self._fps if self._fps > 0 else 0.0
 
     @property
     def video_buffer_size_mb(self) -> float:
@@ -680,7 +696,9 @@ class Display:
         print("           DISPLAY STATS")
         print(f"{'=' * 50}")
         print(f"🖥️  Screen buffer:         {'Initialized' if self._screen_buffer else 'Not initialized'}")
-        print(f"📷 Raw frames in buffer:  {self.raw_frame_count}")
+        raw_info = f"{self.raw_frame_count} / {self.max_raw_frames}"
+        raw_secs = f"({self.raw_buffer_seconds:.1f}s / {self.max_raw_buffer_seconds:.1f}s)"
+        print(f"📷 Raw frames in buffer:  {raw_info} {raw_secs}")
         print(f"   Total frames received: {self._stats['frames_received']}")
         print(f"   Bitmaps applied:       {self._stats['bitmaps_applied']}")
         print(f"⏱️  Recording duration:    {self.recording_duration_seconds:.1f}s")

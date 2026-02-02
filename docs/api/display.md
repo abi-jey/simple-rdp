@@ -120,7 +120,7 @@ Display(
     height: int = 1080,
     fps: int = 30,
     max_video_buffer_mb: float = 100,
-    max_raw_frames: int = 300,
+    max_raw_frames: int | None = None,  # Defaults to fps * 10
 )
 ```
 
@@ -132,24 +132,24 @@ Display(
 | `height` | `int` | `1080` | Frame height in pixels |
 | `fps` | `int` | `30` | Target frames per second for encoding |
 | `max_video_buffer_mb` | `float` | `100` | Maximum video buffer size in MB |
-| `max_raw_frames` | `int` | `300` | Maximum raw frames to keep in memory |
+| `max_raw_frames` | `int \| None` | `None` | Maximum raw frames to buffer. Defaults to `fps * 10` (~10 seconds) |
 
 ### Example
 
 ```python
 from simple_rdp import Display
 
-# Create display for 1080p at 30fps
+# Create display for 1080p at 30fps (300 frame buffer = 10 seconds)
 display = Display(width=1920, height=1080, fps=30)
+print(display.max_raw_frames)  # 300
 
-# Create display with custom buffer limits
-display = Display(
-    width=1280,
-    height=720,
-    fps=60,
-    max_video_buffer_mb=200,
-    max_raw_frames=600,
-)
+# Create display at 60fps (600 frame buffer = 10 seconds)
+display = Display(width=1280, height=720, fps=60)
+print(display.max_raw_frames)  # 600
+
+# Custom buffer size (override auto-calculation)
+display = Display(fps=30, max_raw_frames=90)  # 3 seconds only
+```
 ```
 
 ---
@@ -200,6 +200,40 @@ def raw_frame_count(self) -> int
 ```
 
 Number of raw frames currently in buffer.
+
+### max_raw_frames
+
+```python
+@property
+def max_raw_frames(self) -> int
+```
+
+Maximum number of raw frames that can be buffered.
+
+### raw_buffer_seconds
+
+```python
+@property
+def raw_buffer_seconds(self) -> float
+```
+
+Current raw frame buffer size in seconds (frames / fps).
+
+### max_raw_buffer_seconds
+
+```python
+@property
+def max_raw_buffer_seconds(self) -> float
+```
+
+Maximum raw frame buffer size in seconds.
+
+**Example:**
+```python
+display = Display(fps=60)
+print(f"Buffer capacity: {display.max_raw_buffer_seconds}s")  # 10.0s
+print(f"Current buffer: {display.raw_buffer_seconds}s")       # 0.0s
+```
 
 ### video_buffer_size_mb
 
