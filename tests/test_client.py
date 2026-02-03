@@ -392,6 +392,36 @@ class TestClientDisplay:
         assert "frames_encoded" in stats
         assert "encoding_errors" in stats
 
+    @patch("subprocess.run")
+    def test_transcode_success(self, mock_run):
+        """Test transcode returns True on success."""
+        mock_run.return_value = MagicMock(returncode=0)
+        result = RDPClient.transcode("input.ts", "output.mp4")
+        assert result is True
+        mock_run.assert_called_once()
+        # Verify ffmpeg was called with correct arguments
+        call_args = mock_run.call_args[0][0]
+        assert "ffmpeg" in call_args
+        assert "input.ts" in call_args
+        assert "output.mp4" in call_args
+        assert "-c" in call_args
+        assert "copy" in call_args
+
+    @patch("subprocess.run")
+    def test_transcode_failure(self, mock_run):
+        """Test transcode returns False on ffmpeg error."""
+        import subprocess
+        mock_run.side_effect = subprocess.CalledProcessError(1, "ffmpeg", stderr="error")
+        result = RDPClient.transcode("input.ts", "output.mp4")
+        assert result is False
+
+    @patch("subprocess.run")
+    def test_transcode_ffmpeg_not_found(self, mock_run):
+        """Test transcode returns False when ffmpeg is not installed."""
+        mock_run.side_effect = FileNotFoundError()
+        result = RDPClient.transcode("input.ts", "output.mp4")
+        assert result is False
+
     @pytest.mark.asyncio
     @patch("subprocess.Popen")
     async def test_disconnect_stops_streaming(self, mock_popen):

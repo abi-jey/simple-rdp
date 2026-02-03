@@ -27,6 +27,70 @@ from PIL import Image
 logger = getLogger(__name__)
 
 
+def _create_default_pointer() -> Image.Image:
+    """
+    Create a default arrow pointer image.
+
+    Returns a 16x24 pixel white arrow cursor with black outline,
+    similar to the standard Windows arrow cursor.
+    """
+    # Arrow cursor bitmap (16x24 pixels)
+    # 0 = transparent, 1 = black (outline), 2 = white (fill)
+    cursor_data = [
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0],
+        [1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        [1, 2, 2, 2, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 2, 1, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 2, 1, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 0, 0, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+    ]
+
+    # Color mapping: (R, G, B, A)
+    colors = {
+        0: (0, 0, 0, 0),  # Transparent
+        1: (0, 0, 0, 255),  # Black outline
+        2: (255, 255, 255, 255),  # White fill
+    }
+
+    width = len(cursor_data[0])
+    height = len(cursor_data)
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    for y, row in enumerate(cursor_data):
+        for x, pixel in enumerate(row):
+            img.putpixel((x, y), colors[pixel])
+
+    return img
+
+
+# Default pointer (lazy-loaded singleton)
+_DEFAULT_POINTER: Image.Image | None = None
+
+
+def _get_default_pointer() -> Image.Image:
+    """Get the default pointer image (lazy-loaded singleton)."""
+    global _DEFAULT_POINTER
+    if _DEFAULT_POINTER is None:
+        _DEFAULT_POINTER = _create_default_pointer()
+    return _DEFAULT_POINTER
+
+
 @dataclass
 class ScreenBuffer:
     """Represents a captured screen frame."""
@@ -292,20 +356,24 @@ class Display:
         # Copy raw screen to consumer buffer
         self._consumer_buffer = self._screen_buffer.copy()
 
-        # Composite pointer if visible and we have a pointer image
-        if self._pointer_visible and self._pointer_image is not None:
+        # Composite pointer if visible
+        if self._pointer_visible:
+            # Use custom pointer if available, otherwise use default arrow
+            pointer = self._pointer_image if self._pointer_image is not None else _get_default_pointer()
+            hotspot = self._pointer_hotspot if self._pointer_image is not None else (0, 0)
+
             # Calculate position adjusted for hotspot
-            px = self._pointer_x - self._pointer_hotspot[0]
-            py = self._pointer_y - self._pointer_hotspot[1]
+            px = self._pointer_x - hotspot[0]
+            py = self._pointer_y - hotspot[1]
 
             # Only paste if within bounds
-            if -self._pointer_image.width < px < self._width and -self._pointer_image.height < py < self._height:
+            if -pointer.width < px < self._width and -pointer.height < py < self._height:
                 try:
                     # Use alpha composite if pointer has alpha channel
-                    if self._pointer_image.mode == "RGBA":
-                        self._consumer_buffer.paste(self._pointer_image, (px, py), self._pointer_image)
+                    if pointer.mode == "RGBA":
+                        self._consumer_buffer.paste(pointer, (px, py), pointer)
                     else:
-                        self._consumer_buffer.paste(self._pointer_image, (px, py))
+                        self._consumer_buffer.paste(pointer, (px, py))
                 except Exception as e:
                     logger.debug(f"Error compositing pointer: {e}")
 
@@ -631,16 +699,24 @@ class Display:
         Add a frame from a PIL Image.
 
         This converts the image to raw RGB bytes and stores it,
-        then sends to ffmpeg for encoding.
+        then sends to ffmpeg for encoding. The pointer is composited
+        onto the frame before encoding.
 
         Args:
             image: PIL Image to add (will be converted to RGB if needed).
         """
-        # Convert to RGB if needed and get raw bytes
-        if image.mode != "RGB":
-            image = image.convert("RGB")
+        # Update consumer buffer with pointer composited
+        if self._consumer_buffer_dirty or self._consumer_buffer is None:
+            self._update_consumer_buffer()
 
-        raw_data = image.tobytes()
+        # Use consumer buffer (with pointer) if available, otherwise original image
+        frame_image = self._consumer_buffer if self._consumer_buffer is not None else image
+
+        # Convert to RGB if needed and get raw bytes
+        if frame_image.mode != "RGB":
+            frame_image = frame_image.convert("RGB")
+
+        raw_data = frame_image.tobytes()
 
         await self.add_raw_frame(raw_data)
 

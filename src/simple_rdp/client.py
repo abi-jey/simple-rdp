@@ -430,6 +430,48 @@ class RDPClient:
         """
         return self._display.stats
 
+    @staticmethod
+    def transcode(input_path: str, output_path: str) -> bool:
+        """
+        Transcode a video file to another format.
+
+        Useful for converting MPEG-TS (.ts) recordings to MP4 or other formats.
+        Uses ffmpeg with stream copy (no re-encoding) for fast conversion.
+
+        Args:
+            input_path: Path to input video file (e.g., "recording.ts").
+            output_path: Path to output video file (e.g., "recording.mp4").
+
+        Returns:
+            True if successful, False otherwise.
+
+        Example:
+            >>> RDPClient.transcode("session.ts", "session.mp4")
+            True
+        """
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",  # Overwrite output
+                    "-i", input_path,
+                    "-c", "copy",  # Stream copy (no re-encoding)
+                    output_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Transcode failed: {e.stderr}")
+            return False
+        except FileNotFoundError:
+            logger.error("ffmpeg not found. Please install ffmpeg.")
+            return False
+
     # ==================== Input Methods ====================
 
     async def send_key(
@@ -488,6 +530,9 @@ class RDPClient:
         event_data = build_mouse_event(x, y, button=0, is_move=True)
         await self._send_input_events([(event_time, INPUT_EVENT_MOUSE, event_data)])
 
+        # Update local pointer position for compositing
+        self._display.update_pointer(x=x, y=y)
+
     async def mouse_click(
         self,
         x: int,
@@ -531,6 +576,9 @@ class RDPClient:
 
         await self._send_input_events(events)
 
+        # Update local pointer position for compositing
+        self._display.update_pointer(x=x, y=y)
+
     async def mouse_button_down(self, x: int, y: int, button: int | str = 1) -> None:
         """
         Press a mouse button down at a position.
@@ -547,6 +595,9 @@ class RDPClient:
         ]
         await self._send_input_events(events)
 
+        # Update local pointer position for compositing
+        self._display.update_pointer(x=x, y=y)
+
     async def mouse_button_up(self, x: int, y: int, button: int | str = 1) -> None:
         """
         Release a mouse button at a position.
@@ -562,6 +613,9 @@ class RDPClient:
             (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=False, is_move=False))
         ]
         await self._send_input_events(events)
+
+        # Update local pointer position for compositing
+        self._display.update_pointer(x=x, y=y)
 
     async def mouse_wheel(self, x: int, y: int, delta: int) -> None:
         """
@@ -1179,21 +1233,24 @@ class RDPClient:
         elif update_code == 0x05:  # FASTPATH_UPDATETYPE_PTR_NULL (hidden)
             self._pointer_visible = False
             self._display.update_pointer(visible=False)
-            logger.debug("Pointer hidden")
+            logger.debug("Pointer hidden (PTR_NULL)")
         elif update_code == 0x06:  # FASTPATH_UPDATETYPE_PTR_DEFAULT
             self._pointer_visible = True
             self._pointer_image = None  # Use system default
             self._display.update_pointer(visible=True, image=None)
-            logger.debug("Pointer set to default")
+            logger.debug("Pointer set to default (PTR_DEFAULT)")
         elif update_code == 0x08:  # FASTPATH_UPDATETYPE_PTR_POSITION
             await self._process_pointer_position(update_data)
         elif update_code == 0x09:  # FASTPATH_UPDATETYPE_COLOR
+            logger.debug(f"Color pointer received, data_len={len(update_data)}")
             await self._process_color_pointer(update_data)
         elif update_code == 0x0A:  # FASTPATH_UPDATETYPE_CACHED
             await self._process_cached_pointer(update_data)
         elif update_code == 0x0B:  # FASTPATH_UPDATETYPE_POINTER (new pointer)
+            logger.debug(f"New pointer received, data_len={len(update_data)}")
             await self._process_new_pointer(update_data)
         elif update_code == 0x0C:  # FASTPATH_UPDATETYPE_LARGE_POINTER
+            logger.debug(f"Large pointer received, data_len={len(update_data)}")
             await self._process_new_pointer(update_data, large=True)
         # Other update types (palette, etc.) are ignored for now
 
@@ -1245,6 +1302,7 @@ class RDPClient:
         if len(data) < 2:
             return
         xor_bpp = struct.unpack("<H", data[0:2])[0]
+        logger.debug(f"New pointer: bpp={xor_bpp}, large={large}")
         await self._parse_pointer_data(data[2:], bpp=xor_bpp)
 
     async def _parse_pointer_data(self, data: bytes, bpp: int = 24) -> None:
@@ -1306,6 +1364,8 @@ class RDPClient:
         # Create RGBA image
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         pixels = img.load()
+        if pixels is None:
+            return None
 
         bytes_per_pixel = bpp // 8
         # XOR mask is bottom-up, padded to 2-byte boundary per row
