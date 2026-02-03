@@ -411,6 +411,7 @@ class TestClientDisplay:
     def test_transcode_failure(self, mock_run):
         """Test transcode returns False on ffmpeg error."""
         import subprocess
+
         mock_run.side_effect = subprocess.CalledProcessError(1, "ffmpeg", stderr="error")
         result = RDPClient.transcode("input.ts", "output.mp4")
         assert result is False

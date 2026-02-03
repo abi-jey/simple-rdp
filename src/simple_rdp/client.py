@@ -452,12 +452,14 @@ class RDPClient:
         import subprocess
 
         try:
-            result = subprocess.run(
+            subprocess.run(
                 [
                     "ffmpeg",
                     "-y",  # Overwrite output
-                    "-i", input_path,
-                    "-c", "copy",  # Stream copy (no re-encoding)
+                    "-i",
+                    input_path,
+                    "-c",
+                    "copy",  # Stream copy (no re-encoding)
                     output_path,
                 ],
                 capture_output=True,
