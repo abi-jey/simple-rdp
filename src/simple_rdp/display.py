@@ -334,11 +334,11 @@ class Display:
         """
         now = time.time()
 
-        # Check rate limit for position-only updates
-        if image is None and hotspot is None and visible is None:
-            if now - self._last_pointer_update < self._pointer_update_interval:
-                self._stats["pointer_updates_throttled"] += 1
-                return False
+        # Check rate limit for position-only updates (combine conditions per SIM102)
+        is_position_only = image is None and hotspot is None and visible is None
+        if is_position_only and now - self._last_pointer_update < self._pointer_update_interval:
+            self._stats["pointer_updates_throttled"] += 1
+            return False
 
         # Apply updates
         if x is not None:
@@ -372,6 +372,8 @@ class Display:
             if self._consumer_buffer_dirty or self._consumer_buffer is None:
                 self._update_consumer_buffer()
 
+            # At this point consumer_buffer is guaranteed to be set by _update_consumer_buffer
+            assert self._consumer_buffer is not None
             return self._consumer_buffer.copy()
 
     async def save_screenshot(self, path: str) -> None:
