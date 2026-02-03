@@ -1231,9 +1231,7 @@ class RDPClient:
             self._pointer_image, self._pointer_hotspot = self._pointer_cache[cache_index]
             self._pointer_visible = True
             # Update display (image change bypasses rate limiting)
-            self._display.update_pointer(
-                image=self._pointer_image, hotspot=self._pointer_hotspot, visible=True
-            )
+            self._display.update_pointer(image=self._pointer_image, hotspot=self._pointer_hotspot, visible=True)
             logger.debug(f"Using cached pointer: index={cache_index}")
         else:
             logger.debug(f"Cached pointer not found: index={cache_index}")
@@ -1291,9 +1289,7 @@ class RDPClient:
                 self._pointer_visible = True
                 self._pointer_cache[cache_index] = (pointer_img, (hotspot_x, hotspot_y))
                 # Update display (image change bypasses rate limiting)
-                self._display.update_pointer(
-                    image=pointer_img, hotspot=(hotspot_x, hotspot_y), visible=True
-                )
+                self._display.update_pointer(image=pointer_img, hotspot=(hotspot_x, hotspot_y), visible=True)
                 logger.debug(
                     f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}"
                 )
