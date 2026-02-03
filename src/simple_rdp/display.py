@@ -98,9 +98,22 @@ class Display:
         # Default to ~10 seconds of buffer based on fps
         self._max_raw_frames = max_raw_frames if max_raw_frames is not None else fps * self.DEFAULT_RAW_BUFFER_SECONDS
 
-        # Screen buffer - the current screen state as a PIL Image
+        # Screen buffers:
+        # - _screen_buffer: raw screen state from RDP bitmap updates (no pointer)
+        # - _consumer_buffer: screen + pointer composited (for screenshots/video)
         self._screen_buffer: Image.Image | None = None
+        self._consumer_buffer: Image.Image | None = None
+        self._consumer_buffer_dirty: bool = True  # Needs redraw
         self._screen_lock = asyncio.Lock()
+
+        # Pointer state and rate limiting
+        self._pointer_x: int = 0
+        self._pointer_y: int = 0
+        self._pointer_visible: bool = True
+        self._pointer_image: Image.Image | None = None
+        self._pointer_hotspot: tuple[int, int] = (0, 0)
+        self._last_pointer_update: float = 0.0
+        self._pointer_update_interval: float = 1.0 / fps  # Cap to FPS
 
         # Raw frame storage (deque for O(1) append and popleft)
         self._raw_frames: deque[ScreenBuffer] = deque(maxlen=max_raw_frames)
@@ -136,6 +149,8 @@ class Display:
             "chunks_evicted": 0,
             "encoding_errors": 0,
             "bitmaps_applied": 0,
+            "pointer_updates": 0,
+            "pointer_updates_throttled": 0,
         }
 
         # Lock for thread-safe frame access
@@ -264,20 +279,100 @@ class Display:
         return self._screen_buffer
 
     def initialize_screen(self) -> None:
-        """Initialize the screen buffer with a black image."""
+        """Initialize the screen buffers with black images."""
         self._screen_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        self._consumer_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        self._consumer_buffer_dirty = True
+
+    def _update_consumer_buffer(self) -> None:
+        """Update the consumer buffer with screen + pointer composited."""
+        if self._screen_buffer is None:
+            return
+
+        # Copy raw screen to consumer buffer
+        self._consumer_buffer = self._screen_buffer.copy()
+
+        # Composite pointer if visible and we have a pointer image
+        if self._pointer_visible and self._pointer_image is not None:
+            # Calculate position adjusted for hotspot
+            px = self._pointer_x - self._pointer_hotspot[0]
+            py = self._pointer_y - self._pointer_hotspot[1]
+
+            # Only paste if within bounds
+            if -self._pointer_image.width < px < self._width and -self._pointer_image.height < py < self._height:
+                try:
+                    # Use alpha composite if pointer has alpha channel
+                    if self._pointer_image.mode == "RGBA":
+                        self._consumer_buffer.paste(self._pointer_image, (px, py), self._pointer_image)
+                    else:
+                        self._consumer_buffer.paste(self._pointer_image, (px, py))
+                except Exception as e:
+                    logger.debug(f"Error compositing pointer: {e}")
+
+        self._consumer_buffer_dirty = False
+
+    def update_pointer(
+        self,
+        x: int | None = None,
+        y: int | None = None,
+        visible: bool | None = None,
+        image: Image.Image | None = None,
+        hotspot: tuple[int, int] | None = None,
+    ) -> bool:
+        """
+        Update pointer state with FPS-based rate limiting.
+
+        Args:
+            x: New X position (or None to keep current)
+            y: New Y position (or None to keep current)
+            visible: Visibility state (or None to keep current)
+            image: New pointer image (or None to keep current)
+            hotspot: New hotspot (or None to keep current)
+
+        Returns:
+            True if update was applied, False if throttled
+        """
+        now = time.time()
+
+        # Check rate limit for position-only updates
+        if image is None and hotspot is None and visible is None:
+            if now - self._last_pointer_update < self._pointer_update_interval:
+                self._stats["pointer_updates_throttled"] += 1
+                return False
+
+        # Apply updates
+        if x is not None:
+            self._pointer_x = x
+        if y is not None:
+            self._pointer_y = y
+        if visible is not None:
+            self._pointer_visible = visible
+        if image is not None:
+            self._pointer_image = image
+        if hotspot is not None:
+            self._pointer_hotspot = hotspot
+
+        self._last_pointer_update = now
+        self._consumer_buffer_dirty = True
+        self._stats["pointer_updates"] += 1
+        return True
 
     async def screenshot(self) -> Image.Image:
         """
-        Capture the current screen.
+        Capture the current screen with pointer composited.
 
         Returns:
-            PIL Image of the current screen state.
+            PIL Image of the current screen state with pointer overlay.
         """
         async with self._screen_lock:
             if self._screen_buffer is None:
                 return Image.new("RGB", (self._width, self._height), (0, 0, 0))
-            return self._screen_buffer.copy()
+
+            # Update consumer buffer if dirty
+            if self._consumer_buffer_dirty or self._consumer_buffer is None:
+                self._update_consumer_buffer()
+
+            return self._consumer_buffer.copy()
 
     async def save_screenshot(self, path: str) -> None:
         """
@@ -352,6 +447,7 @@ class Display:
                 # Paste onto screen buffer
                 self._screen_buffer.paste(img, (x, y))
                 self._stats["bitmaps_applied"] += 1
+                self._consumer_buffer_dirty = True  # Mark for redraw with pointer
 
                 # Note: Raw frame capture is handled by RDPClient's capture loop at fixed FPS
                 # If encoding is active, frames are sent to ffmpeg in add_frame()

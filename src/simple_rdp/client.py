@@ -1178,10 +1178,12 @@ class RDPClient:
             pass  # Synchronize update
         elif update_code == 0x05:  # FASTPATH_UPDATETYPE_PTR_NULL (hidden)
             self._pointer_visible = False
+            self._display.update_pointer(visible=False)
             logger.debug("Pointer hidden")
         elif update_code == 0x06:  # FASTPATH_UPDATETYPE_PTR_DEFAULT
             self._pointer_visible = True
             self._pointer_image = None  # Use system default
+            self._display.update_pointer(visible=True, image=None)
             logger.debug("Pointer set to default")
         elif update_code == 0x08:  # FASTPATH_UPDATETYPE_PTR_POSITION
             await self._process_pointer_position(update_data)
@@ -1216,6 +1218,8 @@ class RDPClient:
         self._pointer_x = struct.unpack("<H", data[0:2])[0]
         self._pointer_y = struct.unpack("<H", data[2:4])[0]
         self._pointer_visible = True
+        # Update display with rate limiting
+        self._display.update_pointer(x=self._pointer_x, y=self._pointer_y, visible=True)
         logger.debug(f"Pointer position: ({self._pointer_x}, {self._pointer_y})")
 
     async def _process_cached_pointer(self, data: bytes) -> None:
@@ -1226,6 +1230,10 @@ class RDPClient:
         if cache_index in self._pointer_cache:
             self._pointer_image, self._pointer_hotspot = self._pointer_cache[cache_index]
             self._pointer_visible = True
+            # Update display (image change bypasses rate limiting)
+            self._display.update_pointer(
+                image=self._pointer_image, hotspot=self._pointer_hotspot, visible=True
+            )
             logger.debug(f"Using cached pointer: index={cache_index}")
         else:
             logger.debug(f"Cached pointer not found: index={cache_index}")
@@ -1282,6 +1290,10 @@ class RDPClient:
                 self._pointer_hotspot = (hotspot_x, hotspot_y)
                 self._pointer_visible = True
                 self._pointer_cache[cache_index] = (pointer_img, (hotspot_x, hotspot_y))
+                # Update display (image change bypasses rate limiting)
+                self._display.update_pointer(
+                    image=pointer_img, hotspot=(hotspot_x, hotspot_y), visible=True
+                )
                 logger.debug(
                     f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}"
                 )
