@@ -74,3 +74,8 @@ fastmcp = "^2.0.0"
 [tool.poetry.group.docs.dependencies.mkdocstrings]
 extras = [ "python",]
 version = "^1.0.2"
+
+[tool.poetry.group.dev.dependencies]
+fastapi = "^0.128.0"
+maturin = ">=1.8.0"
+

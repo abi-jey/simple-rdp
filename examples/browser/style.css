@@ -291,16 +291,19 @@ main {
     display: inline-block;
 }
 
-#screen {
+/* Video stream element */
+#video-stream {
     max-width: 100%;
     max-height: calc(100vh - 250px);
     height: auto;
     width: auto;
     display: block;
     object-fit: contain;
+    background: #000;
+    border-radius: 8px;
 }
 
-#screen.hidden {
+#video-stream.hidden {
     display: none;
 }
 

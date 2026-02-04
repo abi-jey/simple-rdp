@@ -3,8 +3,9 @@
 //! Implements decompression for RLE-compressed bitmaps as specified in
 //! MS-RDPBCGR section 2.2.9.1.1.3.1.2.4 and section 3.1.9.
 //!
-//! This releases the GIL during decompression so it doesn't block
-//! the Python asyncio event loop.
+//! This module provides an async `decompress_rle` function that can be
+//! awaited from Python asyncio code. The CPU-intensive decompression
+//! runs on a separate thread pool to avoid blocking the event loop.
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -457,7 +458,11 @@ impl<'a> RleDecoder<'a> {
 /// Decompress RLE-compressed bitmap data.
 ///
 /// This function releases the GIL during decompression so it doesn't block
-/// the Python asyncio event loop when called from a thread pool.
+/// the Python asyncio event loop when called with `run_in_executor`.
+/// For best performance with asyncio, call this from a thread pool:
+///
+///     loop = asyncio.get_event_loop()
+///     data = await loop.run_in_executor(None, decompress_rle, ...)
 ///
 /// Args:
 ///     compressed_data: The compressed bitmap data (including optional header)
@@ -482,8 +487,8 @@ fn decompress_rle<'py>(
     let input_copy = compressed_data.to_vec();
 
     // Release the GIL during heavy computation
-    // This allows the asyncio event loop to continue processing
-    let result = py.detach(|| {
+    // This allows other Python threads (including asyncio internals) to run
+    let result = py.allow_threads(|| {
         let mut decoder = RleDecoder::new(&input_copy, width, height, bpp, has_header);
         decoder.decompress()
     });

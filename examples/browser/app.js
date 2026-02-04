@@ -1,13 +1,12 @@
 /**
  * Simple RDP Viewer - Browser Client
  * With mouse and keyboard capture support
+ * Uses MPEG-TS video streaming via Media Source Extensions
  */
 
 class RDPViewer {
     constructor() {
         this.ws = null;
-        this.canvas = document.getElementById('screen');
-        this.ctx = this.canvas.getContext('2d');
         this.viewerContainer = document.getElementById('viewer-container');
         this.canvasWrapper = document.querySelector('.canvas-wrapper');
         this.statusEl = document.getElementById('status');
@@ -22,13 +21,11 @@ class RDPViewer {
         this.mouseBadge = document.getElementById('mouse-badge');
         this.keyboardBadge = document.getElementById('keyboard-badge');
         
-        this.frameCount = 0;
+        // FPS tracking using video playback quality
+        this.lastTotalFrames = 0;
+        this.lastDroppedFrames = 0;
         this.lastFpsUpdate = Date.now();
         this.fps = 0;
-        
-        // Canvas scaling
-        this.nativeWidth = 0;
-        this.nativeHeight = 0;
         
         // Input capture state
         this.mouseEnabled = false;
@@ -36,6 +33,14 @@ class RDPViewer {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         this.mouseMoveThrottle = null;
+        
+        // Video streaming via WebSocket + MSE
+        this.videoElement = null;
+        this.mediaSource = null;
+        this.sourceBuffer = null;
+        this.videoStreamActive = false;
+        this.pendingChunks = [];
+        this.videoWs = null;  // WebSocket for video stream
         
         // Bound event handlers (for removal)
         this.boundMouseMove = this.handleMouseMove.bind(this);
@@ -106,11 +111,11 @@ class RDPViewer {
                 } else if (!data.connected && data.error) {
                     this.loadingText.textContent = 'RDP not connected. Click Reconnect to try again.';
                 }
-                break;
                 
-            case 'frame':
-                this.renderFrame(data);
-                this.hideError();
+                // Auto-start video stream when connected
+                if (data.connected && !this.videoStreamActive) {
+                    this.startVideoStream();
+                }
                 break;
                 
             case 'pong':
@@ -135,8 +140,13 @@ class RDPViewer {
         console.log('Attempting to reconnect to RDP...');
         this.loadingText.textContent = 'Reconnecting to RDP server...';
         this.loadingEl.classList.remove('hidden');
-        this.canvas.classList.add('hidden');
+        if (this.videoElement) {
+            this.videoElement.classList.add('hidden');
+        }
         this.hideError();
+        
+        // Stop existing video stream
+        this.stopVideoStream();
         
         try {
             const response = await fetch('/connect', { method: 'POST' });
@@ -144,6 +154,7 @@ class RDPViewer {
             
             if (data.success) {
                 console.log('RDP reconnection successful');
+                // Video stream will auto-start when status message is received
             } else {
                 console.log('RDP reconnection failed:', data.error);
                 this.showError(data.error);
@@ -154,31 +165,236 @@ class RDPViewer {
         }
     }
     
-    renderFrame(data) {
-        const img = new Image();
-        img.onload = () => {
-            // Store native dimensions
-            this.nativeWidth = data.width;
-            this.nativeHeight = data.height;
+    // ==================== Video Stream Mode (MPEG-TS via MSE) ====================
+    
+    async startVideoStream() {
+        if (this.videoStreamActive) {
+            console.log('Video stream already active');
+            return;
+        }
+        
+        console.log('Starting video stream...');
+        
+        // Check for MediaSource support with fragmented MP4
+        if (!window.MediaSource || !MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"')) {
+            console.warn('MediaSource Extensions not supported for H.264/MP4');
+            this.showError('Video streaming not supported in this browser.');
+            return;
+        }
+        
+        // Create or show video element
+        if (!this.videoElement) {
+            this.videoElement = document.createElement('video');
+            this.videoElement.id = 'video-stream';
+            this.videoElement.autoplay = true;
+            this.videoElement.muted = true;
+            this.videoElement.playsInline = true;
+            this.videoElement.style.width = '100%';
+            this.videoElement.style.height = 'auto';
+            this.videoElement.style.maxWidth = '100%';
+            this.canvasWrapper.appendChild(this.videoElement);
+        }
+        
+        // Show video element
+        this.videoElement.classList.remove('hidden');
+        
+        try {
+            // Initialize MediaSource
+            this.mediaSource = new MediaSource();
+            this.videoElement.src = URL.createObjectURL(this.mediaSource);
             
-            // Resize canvas if needed
-            if (this.canvas.width !== data.width || this.canvas.height !== data.height) {
-                this.canvas.width = data.width;
-                this.canvas.height = data.height;
-                this.resolutionEl.textContent = `${data.width}x${data.height}`;
+            await new Promise((resolve, reject) => {
+                this.mediaSource.addEventListener('sourceopen', resolve, { once: true });
+                this.mediaSource.addEventListener('error', reject, { once: true });
+            });
+            
+            // Add source buffer for H.264 in fragmented MP4 container
+            // Try different codec strings for compatibility
+            const codecs = [
+                'video/mp4; codecs="avc1.42E01E"',  // Baseline profile
+                'video/mp4; codecs="avc1.4D401F"',  // Main profile
+                'video/mp4; codecs="avc1.64001F"',  // High profile
+            ];
+            
+            for (const codec of codecs) {
+                if (MediaSource.isTypeSupported(codec)) {
+                    try {
+                        this.sourceBuffer = this.mediaSource.addSourceBuffer(codec);
+                        console.log(`Using codec: ${codec}`);
+                        break;
+                    } catch (e) {
+                        console.warn(`Failed to add source buffer for ${codec}:`, e);
+                    }
+                }
             }
             
-            // Draw the frame (cursor is composited on the server side)
-            this.ctx.drawImage(img, 0, 0);
+            if (!this.sourceBuffer) {
+                throw new Error('Could not create source buffer for H.264/MP4');
+            }
             
-            // Hide loading, show canvas
+            this.sourceBuffer.mode = 'sequence';
+            this.sourceBuffer.addEventListener('updateend', () => this.processNextChunk());
+            this.sourceBuffer.addEventListener('error', (e) => {
+                console.error('SourceBuffer error:', e);
+            });
+            
+            this.videoStreamActive = true;
+            this.pendingChunks = [];
+            this.maxPendingChunks = 30;  // Limit pending chunks to prevent memory bloat
+            
+            // Start fetching the video stream
+            this.fetchVideoStream();
+            
+            console.log('Video stream initialized');
             this.loadingEl.classList.add('hidden');
-            this.canvas.classList.remove('hidden');
             
-            // Update frame count for FPS
-            this.frameCount++;
+        } catch (error) {
+            console.error('Failed to initialize video stream:', error);
+            this.stopVideoStream();
+            this.showError(`Video stream error: ${error.message}`);
+        }
+    }
+    
+    async fetchVideoStream() {
+        if (!this.videoStreamActive) return;
+        
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/video`;
+        
+        console.log(`Connecting to video WebSocket: ${wsUrl}`);
+        this.videoWs = new WebSocket(wsUrl);
+        this.videoWs.binaryType = 'arraybuffer';
+        
+        this.videoWs.onopen = () => {
+            console.log('Video WebSocket connected');
         };
-        img.src = `data:image/jpeg;base64,${data.data}`;
+        
+        this.videoWs.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                // Binary video data
+                const chunk = new Uint8Array(event.data);
+                if (chunk.length > 0) {
+                    // Drop oldest chunks if queue is too long (back-pressure)
+                    while (this.pendingChunks.length >= this.maxPendingChunks) {
+                        this.pendingChunks.shift();
+                        console.debug('Dropped old video chunk (back-pressure)');
+                    }
+                    this.pendingChunks.push(chunk);
+                    this.processNextChunk();
+                }
+            } else {
+                // JSON control message
+                try {
+                    const msg = JSON.parse(event.data);
+                    console.log('Video WebSocket message:', msg);
+                    if (msg.type === 'error') {
+                        this.showError(msg.message);
+                    } else if (msg.type === 'status') {
+                        this.loadingText.textContent = msg.message;
+                    }
+                } catch (e) {
+                    console.warn('Unknown message format:', event.data);
+                }
+            }
+        };
+        
+        this.videoWs.onclose = (event) => {
+            console.log(`Video WebSocket closed: ${event.code} ${event.reason}`);
+            if (this.videoStreamActive) {
+                // Reconnect after delay
+                console.log('Reconnecting video WebSocket in 2s...');
+                setTimeout(() => this.fetchVideoStream(), 2000);
+            }
+        };
+        
+        this.videoWs.onerror = (error) => {
+            console.error('Video WebSocket error:', error);
+        };
+    }
+    
+    processNextChunk() {
+        if (!this.sourceBuffer || 
+            this.sourceBuffer.updating || 
+            this.pendingChunks.length === 0 ||
+            !this.videoStreamActive) {
+            return;
+        }
+        
+        // Proactively trim buffer if it's getting too long (more than 5 seconds)
+        if (this.sourceBuffer.buffered.length > 0) {
+            const bufferedEnd = this.sourceBuffer.buffered.end(0);
+            const bufferedStart = this.sourceBuffer.buffered.start(0);
+            const bufferedDuration = bufferedEnd - bufferedStart;
+            
+            // Keep only last 3 seconds of video for lower latency
+            if (bufferedDuration > 5 && !this.sourceBuffer.updating) {
+                const removeEnd = bufferedEnd - 3;
+                if (removeEnd > bufferedStart) {
+                    try {
+                        this.sourceBuffer.remove(bufferedStart, removeEnd);
+                        // Also seek to near live edge if we're behind
+                        if (this.videoElement && this.videoElement.currentTime < bufferedEnd - 2) {
+                            this.videoElement.currentTime = bufferedEnd - 0.5;
+                        }
+                        return; // Wait for removal to complete
+                    } catch (e) {
+                        console.debug('Buffer trim failed:', e);
+                    }
+                }
+            }
+        }
+        
+        try {
+            const chunk = this.pendingChunks.shift();
+            this.sourceBuffer.appendBuffer(chunk);
+        } catch (error) {
+            console.error('Error appending buffer:', error);
+            // If quota exceeded, remove old data aggressively
+            if (error.name === 'QuotaExceededError' && this.sourceBuffer.buffered.length > 0) {
+                const start = this.sourceBuffer.buffered.start(0);
+                const end = this.sourceBuffer.buffered.end(0) - 2; // Keep only last 2 seconds
+                if (end > start) {
+                    this.sourceBuffer.remove(start, end);
+                }
+            }
+        }
+    }
+    
+    stopVideoStream() {
+        console.log('Stopping video stream');
+        this.videoStreamActive = false;
+        this.pendingChunks = [];
+        
+        // Close video WebSocket
+        if (this.videoWs) {
+            this.videoWs.close();
+            this.videoWs = null;
+        }
+        
+        if (this.sourceBuffer && this.mediaSource && this.mediaSource.readyState === 'open') {
+            try {
+                this.mediaSource.removeSourceBuffer(this.sourceBuffer);
+            } catch (e) {
+                console.debug('Error removing source buffer:', e);
+            }
+        }
+        this.sourceBuffer = null;
+        
+        if (this.mediaSource && this.mediaSource.readyState === 'open') {
+            try {
+                this.mediaSource.endOfStream();
+            } catch (e) {
+                console.debug('Error ending media source:', e);
+            }
+        }
+        this.mediaSource = null;
+        
+        if (this.videoElement) {
+            this.videoElement.classList.add('hidden');
+            this.videoElement.src = '';
+        }
+        
+        console.log('Video stream stopped');
     }
     
     setStatus(connected, text) {
@@ -188,35 +404,107 @@ class RDPViewer {
     
     startFpsCounter() {
         setInterval(() => {
-            const now = Date.now();
-            const elapsed = (now - this.lastFpsUpdate) / 1000;
-            this.fps = Math.round(this.frameCount / elapsed);
-            this.fpsEl.textContent = this.fps;
-            this.frameCount = 0;
-            this.lastFpsUpdate = now;
+            // Use actual video playback quality stats if available
+            if (this.videoElement && typeof this.videoElement.getVideoPlaybackQuality === 'function') {
+                const quality = this.videoElement.getVideoPlaybackQuality();
+                const totalFrames = quality.totalVideoFrames;
+                const droppedFrames = quality.droppedVideoFrames;
+                
+                const now = Date.now();
+                const elapsed = (now - this.lastFpsUpdate) / 1000;
+                const framesDelta = totalFrames - this.lastTotalFrames;
+                
+                this.fps = Math.round(framesDelta / elapsed);
+                this.fpsEl.textContent = `${this.fps}`;
+                
+                this.lastTotalFrames = totalFrames;
+                this.lastFpsUpdate = now;
+                
+                // Collect comprehensive diagnostics
+                this.collectDiagnostics(quality);
+            } else {
+                this.fpsEl.textContent = '-';
+            }
         }, 1000);
+    }
+    
+    async collectDiagnostics(videoQuality) {
+        // Client-side diagnostics
+        const diagnostics = {
+            client: {
+                fps: this.fps,
+                totalFrames: videoQuality.totalVideoFrames,
+                droppedFrames: videoQuality.droppedVideoFrames,
+                dropRate: videoQuality.totalVideoFrames > 0 
+                    ? ((videoQuality.droppedVideoFrames / videoQuality.totalVideoFrames) * 100).toFixed(2) + '%'
+                    : '0%',
+                pendingChunks: this.pendingChunks.length,
+                sourceBufferUpdating: this.sourceBuffer?.updating || false,
+            }
+        };
+        
+        // Get buffer info
+        if (this.videoElement && this.sourceBuffer?.buffered?.length > 0) {
+            const buffered = this.sourceBuffer.buffered;
+            const currentTime = this.videoElement.currentTime;
+            const bufferEnd = buffered.end(buffered.length - 1);
+            diagnostics.client.bufferAhead = (bufferEnd - currentTime).toFixed(2) + 's';
+            diagnostics.client.bufferHealth = bufferEnd - currentTime > 1 ? 'good' : 'low';
+        }
+        
+        // Fetch server-side stats
+        try {
+            const response = await fetch('/stream-status');
+            diagnostics.server = await response.json();
+        } catch (e) {
+            diagnostics.server = { error: e.message };
+        }
+        
+        // Store for console access and log periodically
+        this.lastDiagnostics = diagnostics;
+        
+        // Log warnings only for NEW dropped frames
+        const newDrops = videoQuality.droppedVideoFrames - this.lastDroppedFrames;
+        if (newDrops > 0) {
+            console.warn(`⚠️ Dropped ${newDrops} frames (total: ${videoQuality.droppedVideoFrames})`);
+        }
+        this.lastDroppedFrames = videoQuality.droppedVideoFrames;
+        
+        if (this.pendingChunks.length > 10) {
+            console.warn(`⚠️ Chunk queue backing up: ${this.pendingChunks.length} pending`);
+        }
+    }
+    
+    // Call viewer.showDiagnostics() in console to see full stats
+    showDiagnostics() {
+        console.table(this.lastDiagnostics?.client || {});
+        console.table(this.lastDiagnostics?.server?.stats || {});
+        console.log('Server queue:', this.lastDiagnostics?.server?.video_queue_size);
+        console.log('Server FPS:', this.lastDiagnostics?.server?.server_fps);
+        return this.lastDiagnostics;
     }
     
     // ==================== Mouse Handling ====================
     
     toggleMouse(enabled) {
         this.mouseEnabled = enabled;
+        const target = this.videoElement || this.viewerContainer;
         
         if (enabled) {
-            this.canvas.addEventListener('mousemove', this.boundMouseMove);
-            this.canvas.addEventListener('mousedown', this.boundMouseDown);
-            this.canvas.addEventListener('mouseup', this.boundMouseUp);
-            this.canvas.addEventListener('contextmenu', this.boundContextMenu);
-            this.canvas.addEventListener('wheel', this.boundWheel, { passive: false });
+            target.addEventListener('mousemove', this.boundMouseMove);
+            target.addEventListener('mousedown', this.boundMouseDown);
+            target.addEventListener('mouseup', this.boundMouseUp);
+            target.addEventListener('contextmenu', this.boundContextMenu);
+            target.addEventListener('wheel', this.boundWheel, { passive: false });
             this.viewerContainer.classList.add('mouse-capture');
             this.mouseBadge.classList.add('active');
             console.log('Mouse capture enabled');
         } else {
-            this.canvas.removeEventListener('mousemove', this.boundMouseMove);
-            this.canvas.removeEventListener('mousedown', this.boundMouseDown);
-            this.canvas.removeEventListener('mouseup', this.boundMouseUp);
-            this.canvas.removeEventListener('contextmenu', this.boundContextMenu);
-            this.canvas.removeEventListener('wheel', this.boundWheel);
+            target.removeEventListener('mousemove', this.boundMouseMove);
+            target.removeEventListener('mousedown', this.boundMouseDown);
+            target.removeEventListener('mouseup', this.boundMouseUp);
+            target.removeEventListener('contextmenu', this.boundContextMenu);
+            target.removeEventListener('wheel', this.boundWheel);
             this.viewerContainer.classList.remove('mouse-capture');
             this.mouseBadge.classList.remove('active');
             console.log('Mouse capture disabled');
@@ -224,9 +512,13 @@ class RDPViewer {
     }
     
     getMouseCoords(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        const scaleX = this.canvas.width / rect.width;
-        const scaleY = this.canvas.height / rect.height;
+        const target = this.videoElement || e.target;
+        const rect = target.getBoundingClientRect();
+        // Use native video dimensions (1920x1080) for coordinate mapping
+        const nativeWidth = this.videoElement?.videoWidth || 1920;
+        const nativeHeight = this.videoElement?.videoHeight || 1080;
+        const scaleX = nativeWidth / rect.width;
+        const scaleY = nativeHeight / rect.height;
         return {
             x: Math.round((e.clientX - rect.left) * scaleX),
             y: Math.round((e.clientY - rect.top) * scaleY)

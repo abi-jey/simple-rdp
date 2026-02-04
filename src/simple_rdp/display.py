@@ -188,6 +188,7 @@ class Display:
         self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._streaming = False  # Encoding to memory buffer for streaming
+        self._shutting_down = False  # Flag to prevent writes during shutdown
         self._recording_to_file = False  # Recording taps into streaming output
         self._recording_path: str | None = None  # Path for file recording
         self._recording_file: IO[bytes] | None = None  # File handle for recording
@@ -198,12 +199,19 @@ class Display:
         self._chunk_sequence = 0
 
         # Async queue for new chunks (for consumers)
-        self._video_queue: Queue[VideoChunk] = Queue()
+        self._video_queue: Queue[VideoChunk] = Queue(maxsize=100)  # Bounded queue
 
         # Session and recording timing (wall-clock times)
         self._session_start_time: float = time.time()  # When display was created
         self._recording_start_time: float | None = None
         self._first_frame_time: float | None = None
+        
+        # Diagnostic tracking
+        self._last_diag_time: float = 0.0
+        self._diag_interval: float = 5.0  # Log diagnostics every 5 seconds
+        self._frames_since_diag: int = 0
+        self._encode_time_total: float = 0.0
+        self._queue_drops: int = 0
 
         # Stats
         self._stats = {
@@ -215,6 +223,7 @@ class Display:
             "bitmaps_applied": 0,
             "pointer_updates": 0,
             "pointer_updates_throttled": 0,
+            "queue_drops": 0,
         }
 
         # Lock for thread-safe frame access
@@ -353,8 +362,15 @@ class Display:
         if self._screen_buffer is None:
             return
 
-        # Copy raw screen to consumer buffer
-        self._consumer_buffer = self._screen_buffer.copy()
+        # Reuse existing consumer buffer if same size, otherwise create new
+        if (
+            self._consumer_buffer is None 
+            or self._consumer_buffer.size != self._screen_buffer.size
+        ):
+            self._consumer_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        
+        # Paste screen buffer onto consumer buffer (faster than copy())
+        self._consumer_buffer.paste(self._screen_buffer, (0, 0))
 
         # Composite pointer if visible
         if self._pointer_visible:
@@ -529,7 +545,7 @@ class Display:
         """
         Start streaming video to memory buffer.
 
-        Frames are encoded to MPEG-TS format and stored in chunks for
+        Frames are encoded to fragmented MP4 format and stored in chunks for
         live consumption via get_next_video_chunk().
 
         This is ideal for real-time streaming to network consumers.
@@ -545,7 +561,7 @@ class Display:
 
         # Start ffmpeg process
         # Input: raw RGB24 frames via stdin
-        # Output: H.264 MPEG-TS to stdout (for streaming chunks)
+        # Output: H.264 fragmented MP4 to stdout (for MSE streaming)
         cmd = [
             "ffmpeg",
             "-y",
@@ -569,19 +585,34 @@ class Display:
             "yuv420p",
             "-crf",
             "23",
+            "-g",
+            "30",  # Keyframe every 30 frames (1 second at 30fps)
+            "-bf",
+            "0",  # Disable B-frames for lower latency
+            "-refs",
+            "1",  # Single reference frame for speed
+            "-rc-lookahead",
+            "0",  # No lookahead for lower latency
             "-f",
-            "mpegts",  # MPEG-TS for streaming (self-contained chunks)
+            "mp4",  # MP4 container
+            "-movflags",
+            "frag_keyframe+empty_moov+default_base_moof+faststart",  # Fragmented MP4 for streaming
+            "-frag_duration",
+            "100000",  # 100ms fragments for smoother playback
             "pipe:1",  # stdout
         ]
 
         logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps")
 
+        # Calculate optimal buffer size (one frame worth of raw RGB data)
+        frame_size = self._width * self._height * 3
+        
         self._ffmpeg_process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,  # Suppress ffmpeg logs
-            bufsize=0,  # Unbuffered
+            bufsize=frame_size,  # Buffer one frame for better throughput
         )
 
         # Start reader task to consume ffmpeg output
@@ -631,8 +662,11 @@ class Display:
         if not self._streaming:
             return
 
+        # Set shutting_down first to prevent any new writes
+        self._shutting_down = True
         self._streaming = False
         await self._stop_ffmpeg()
+        self._shutting_down = False  # Reset for potential restart
         logger.info("Streaming stopped")
 
     async def stop_file_recording(self) -> None:
@@ -746,30 +780,81 @@ class Display:
             self._frame_count += 1
             self._stats["frames_received"] += 1
 
-        # Send to ffmpeg if encoding
-        if self._ffmpeg_process and self._ffmpeg_process.stdin:
+        # Send to ffmpeg if encoding (skip if shutting down or not streaming)
+        if (
+            self._streaming
+            and not self._shutting_down
+            and self._ffmpeg_process
+            and self._ffmpeg_process.stdin
+        ):
             try:
-                self._ffmpeg_process.stdin.write(data)
-                self._ffmpeg_process.stdin.flush()
+                encode_start = time.perf_counter()
+                # Use run_in_executor to avoid blocking the event loop
+                loop = asyncio.get_event_loop()
+                stdin = self._ffmpeg_process.stdin
+                await loop.run_in_executor(None, lambda: (stdin.write(data), stdin.flush()))
+                encode_time = time.perf_counter() - encode_start
+                self._encode_time_total += encode_time
+                self._frames_since_diag += 1
                 self._stats["frames_encoded"] += 1
-            except (BrokenPipeError, OSError) as e:
-                self._stats["encoding_errors"] += 1
-                logger.debug(f"Error writing to ffmpeg: {e}")
+                
+                # Log diagnostics periodically
+                now = time.time()
+                if now - self._last_diag_time >= self._diag_interval:
+                    self._log_diagnostics()
+                    self._last_diag_time = now
+                    
+            except (BrokenPipeError, OSError):
+                # Expected during shutdown - silently ignore
+                pass
+    
+    def _log_diagnostics(self) -> None:
+        """Log backend pipeline diagnostics."""
+        if self._frames_since_diag == 0:
+            return
+            
+        avg_encode_ms = (self._encode_time_total / self._frames_since_diag) * 1000
+        target_frame_time_ms = 1000 / self._fps
+        
+        # Calculate if we're ahead or behind
+        headroom_ms = target_frame_time_ms - avg_encode_ms
+        status = "✅ AHEAD" if headroom_ms > 0 else "⚠️ BEHIND"
+        
+        queue_size = self._video_queue.qsize()
+        queue_status = "ok" if queue_size < 50 else "⚠️ HIGH" if queue_size < 90 else "🔴 FULL"
+        
+        logger.info(
+            f"📊 Backend: {status} by {abs(headroom_ms):.1f}ms | "
+            f"encode={avg_encode_ms:.1f}ms/frame | "
+            f"target={target_frame_time_ms:.1f}ms | "
+            f"queue={queue_size}/100 ({queue_status}) | "
+            f"drops={self._stats['queue_drops']} | "
+            f"fps_in={self._frames_since_diag / self._diag_interval:.1f}"
+        )
+        
+        # Reset counters
+        self._frames_since_diag = 0
+        self._encode_time_total = 0.0
 
     async def _read_video_output(self) -> None:
         """Read encoded video from ffmpeg stdout, buffer it, and write to file if recording."""
         CHUNK_SIZE = 65536  # 64KB chunks
+        loop = asyncio.get_event_loop()
+
+        def _read_chunk() -> bytes:
+            """Helper to read a chunk from ffmpeg stdout."""
+            if self._ffmpeg_process and self._ffmpeg_process.stdout:
+                return self._ffmpeg_process.stdout.read(CHUNK_SIZE)
+            return b""
 
         while self._streaming and self._ffmpeg_process:
             try:
-                # Read in a thread to avoid blocking
-                loop = asyncio.get_event_loop()
-                data = await loop.run_in_executor(
-                    None,
-                    lambda: self._ffmpeg_process.stdout.read(CHUNK_SIZE)
-                    if self._ffmpeg_process and self._ffmpeg_process.stdout
-                    else b"",
-                )
+                # Use run_in_executor to read without blocking the event loop
+                if self._ffmpeg_process and self._ffmpeg_process.stdout:
+                    # Non-blocking read using executor
+                    data = await loop.run_in_executor(None, _read_chunk)
+                else:
+                    data = b""
 
                 if not data:
                     await asyncio.sleep(0.01)
@@ -800,6 +885,7 @@ class Display:
                 try:
                     self._video_queue.put_nowait(chunk)
                 except asyncio.QueueFull:
+                    self._stats["queue_drops"] += 1
                     logger.debug("Video queue full, dropping chunk (back-pressure)")
 
                 # Evict old chunks if over limit
