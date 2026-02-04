@@ -15,6 +15,8 @@ RDPClient(
     height: int = 1080,
     color_depth: int = 32,
     show_wallpaper: bool = False,
+    capture_fps: int = 30,
+    record_to: str | None = None,
 )
 ```
 
@@ -31,6 +33,8 @@ RDPClient(
 | `height` | `int` | `1080` | Desktop height in pixels |
 | `color_depth` | `int` | `32` | Color depth (16, 24, or 32) |
 | `show_wallpaper` | `bool` | `False` | Show desktop wallpaper |
+| `capture_fps` | `int` | `30` | Target FPS for video capture |
+| `record_to` | `str \| None` | `None` | Path to save recording on disconnect |
 
 ### Example
 
@@ -39,8 +43,7 @@ client = RDPClient(
     host="192.168.1.100",
     username="admin",
     password="secret",
-    width=1920,
-    height=1080,
+    record_to="session_recording.mp4",
 )
 ```
 
@@ -48,84 +51,57 @@ client = RDPClient(
 
 ## Properties
 
-### host
+### Connection Info
 
-```python
-@property
-def host(self) -> str
-```
+#### host
 
 The RDP server hostname or IP address.
 
-### port
-
-```python
-@property
-def port(self) -> int
-```
+#### port
 
 The RDP server port number.
 
-### is_connected
-
-```python
-@property
-def is_connected(self) -> bool
-```
+#### is_connected
 
 Whether the client is currently connected.
 
-### width
-
-```python
-@property
-def width(self) -> int
-```
+#### width
 
 Desktop width in pixels.
 
-### height
-
-```python
-@property
-def height(self) -> int
-```
+#### height
 
 Desktop height in pixels.
 
-### pointer_position
+### Video Streaming
 
-```python
-@property
-def pointer_position(self) -> tuple[int, int]
-```
+#### is_streaming
 
-Current cursor position as `(x, y)` tuple, as reported by the server.
+Whether video streaming is active (always True when connected).
 
-### pointer_visible
+#### consumer_lag_chunks
 
-```python
-@property
-def pointer_visible(self) -> bool
-```
+Number of video chunks waiting in the queue. High values indicate the consumer is too slow.
+
+#### record_to
+
+The path where the session recording will be saved on disconnect.
+
+### Pointer
+
+#### pointer_position
+
+Current cursor position as `(x, y)` tuple.
+
+#### pointer_visible
 
 Whether the cursor is currently visible.
 
-### pointer_image
+#### pointer_image
 
-```python
-@property
-def pointer_image(self) -> Image.Image | None
-```
+The current cursor image as a PIL Image.
 
-The current cursor image as a PIL Image, or `None` if not available.
-
-### pointer_hotspot
-
-```python
-@property
-def pointer_hotspot(self) -> tuple[int, int]
-```
+#### pointer_hotspot
 
 The cursor hotspot offset as `(x, y)` tuple.
 
@@ -139,19 +115,7 @@ The cursor hotspot offset as `(x, y)` tuple.
 async def connect(self) -> None
 ```
 
-Establish connection to the RDP server.
-
-**Raises:**
-
-- `ConnectionError` - If connection fails
-- `AuthenticationError` - If authentication fails
-
-**Example:**
-
-```python
-client = RDPClient(host="192.168.1.100", ...)
-await client.connect()
-```
+Establish connection to the RDP server and start video streaming.
 
 ### disconnect
 
@@ -159,22 +123,52 @@ await client.connect()
 async def disconnect(self) -> None
 ```
 
-Disconnect from the RDP server.
+Disconnect from the RDP server. Stops streaming and saves recording if `record_to` was set.
 
-**Example:**
+---
 
-```python
-await client.disconnect()
-```
+## Video Methods
 
-### Context Manager
+### get_next_video_chunk
 
 ```python
-async with RDPClient(...) as client:
-    # client is connected
-    ...
-# client is disconnected
+async def get_next_video_chunk(self, timeout: float = 1.0) -> VideoChunk | None
 ```
+
+Wait for and return the next video chunk (fMP4 format). Use this for real-time streaming.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `timeout` | `float` | Max wait time in seconds |
+
+**Returns:** `VideoChunk` or `None`.
+
+### is_consumer_behind
+
+```python
+def is_consumer_behind(self, threshold: int = 10) -> bool
+```
+
+Check if the video consumer is lagging behind the stream.
+
+### get_pipeline_stats
+
+```python
+def get_pipeline_stats(self) -> PipelineStats
+```
+
+Get detailed pipeline latency statistics.
+
+### transcode
+
+```python
+@staticmethod
+def transcode(input_path: str, output_path: str) -> bool
+```
+
+Convert a video file (e.g. .ts to .mp4).
 
 ---
 
@@ -186,16 +180,7 @@ async with RDPClient(...) as client:
 async def screenshot(self) -> Image.Image
 ```
 
-Capture the current screen state.
-
-**Returns:** PIL Image of the current screen.
-
-**Example:**
-
-```python
-img = await client.screenshot()
-print(f"Size: {img.size}")
-```
+Capture the current screen state as a PIL Image.
 
 ### save_screenshot
 
@@ -205,325 +190,58 @@ async def save_screenshot(self, path: str) -> None
 
 Save a screenshot to a file.
 
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `str` | File path to save the screenshot |
-
-**Example:**
-
-```python
-await client.save_screenshot("screenshot.png")
-```
-
 ---
 
-## Video Recording Methods
+## Input Methods
 
-### display
+### Keyboard
 
-```python
-@property
-def display(self) -> Display
-```
-
-Access the integrated Display component for video streaming and recording.
-
-**Returns:** `Display` instance for advanced video operations.
-
-### is_streaming
+#### send_key
 
 ```python
-@property
-def is_streaming(self) -> bool
+async def send_key(key: str | int, is_press: bool = True, is_release: bool = True) -> None
 ```
 
-Whether video streaming to memory buffer is currently active.
+Send a keyboard key (char or scancode).
 
-### is_file_recording
+#### send_text
 
 ```python
-@property
-def is_file_recording(self) -> bool
+async def send_text(text: str) -> None
 ```
 
-Whether file recording is currently active.
+Type a text string.
 
-### start_streaming
+### Mouse
+
+#### mouse_move
 
 ```python
-async def start_streaming(self) -> None
+async def mouse_move(x: int, y: int) -> None
 ```
 
-Start video streaming to memory buffer. Frames are encoded to MPEG-TS chunks
-that can be consumed via `display.get_next_video_chunk()`.
+Move mouse to position.
 
-**Example:**
+#### mouse_click
 
 ```python
-await client.start_streaming()
-# Stream chunks to clients
-while client.is_streaming:
-    chunk = await client.display.get_next_video_chunk()
-    if chunk:
-        await send_to_client(chunk.data)
+async def mouse_click(x: int, y: int, button: int = 1, double_click: bool = False) -> None
 ```
 
-### stop_streaming
+Click mouse at position.
+
+#### mouse_drag
 
 ```python
-async def stop_streaming(self) -> None
+async def mouse_drag(x1: int, y1: int, x2: int, y2: int, button: int = 1) -> None
 ```
 
-Stop video streaming. Also stops any active file recording.
+Drag mouse from A to B.
 
-### start_file_recording
+#### mouse_wheel
 
 ```python
-async def start_file_recording(self, path: str) -> None
+async def mouse_wheel(x: int, y: int, delta: int) -> None
 ```
 
-Start recording video to a file. If streaming is not active, it will be started automatically.
-Recording taps into the streaming output for unlimited duration without memory limits.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `str` | Output file path (use `.ts` extension for MPEG-TS) |
-
-**Example:**
-
-```python
-await client.start_file_recording("session.ts")
-# ... session runs for any duration ...
-await client.stop_file_recording()
-```
-
-### stop_file_recording
-
-```python
-async def stop_file_recording(self) -> None
-```
-
-Stop file recording. Streaming continues independently.
-
-### save_video
-
-```python
-async def save_video(self, path: str) -> bool
-```
-
-Save the raw frame buffer (~10 seconds) to a video file.
-
-For full session recording, use `start_file_recording()` instead.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `str` | Output file path (e.g., `"clip.mp4"`) |
-
-**Returns:** `True` if successful, `False` otherwise.
-
-**Example:**
-
-```python
-# Save the last ~10 seconds of frames
-success = await client.save_video("clip.mp4")
-```
-
-### get_recording_stats
-
-```python
-def get_recording_stats(self) -> dict[str, Any]
-```
-
-Get video encoding statistics.
-
-**Returns:** Dictionary with:
-
-- `frames_received` - Total frames added
-- `frames_encoded` - Frames sent to encoder
-- `bytes_encoded` - Total encoded bytes
-- `chunks_evicted` - Chunks removed due to buffer limit
-- `encoding_errors` - Number of encoding errors
-
----
-
-## Keyboard Methods
-
-### send_key
-
-```python
-async def send_key(
-    self,
-    key: str | int,
-    is_press: bool = True,
-    is_release: bool = True,
-) -> None
-```
-
-Send a keyboard key event.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `key` | `str \| int` | *required* | Character string or scancode |
-| `is_press` | `bool` | `True` | Send key press event |
-| `is_release` | `bool` | `True` | Send key release event |
-
-**Example:**
-
-```python
-# Send character
-await client.send_key("a")
-
-# Send scancode (Enter key)
-await client.send_key(0x1C)
-
-# Hold Ctrl key
-await client.send_key(0x1D, is_press=True, is_release=False)
-```
-
-### send_text
-
-```python
-async def send_text(self, text: str) -> None
-```
-
-Send a text string as keyboard input.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `text` | `str` | The text to type |
-
-**Example:**
-
-```python
-await client.send_text("Hello, World!")
-```
-
----
-
-## Mouse Methods
-
-### mouse_move
-
-```python
-async def mouse_move(self, x: int, y: int) -> None
-```
-
-Move the mouse to a position.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `x` | `int` | X coordinate |
-| `y` | `int` | Y coordinate |
-
-### mouse_click
-
-```python
-async def mouse_click(
-    self,
-    x: int,
-    y: int,
-    button: int = 1,
-    double_click: bool = False,
-) -> None
-```
-
-Click the mouse at a position.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `x` | `int` | *required* | X coordinate |
-| `y` | `int` | *required* | Y coordinate |
-| `button` | `int` | `1` | Button (1=left, 2=right, 3=middle) |
-| `double_click` | `bool` | `False` | Double-click |
-
-### mouse_button_down
-
-```python
-async def mouse_button_down(
-    self,
-    x: int,
-    y: int,
-    button: int | str = 1,
-) -> None
-```
-
-Press a mouse button down.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `x` | `int` | *required* | X coordinate |
-| `y` | `int` | *required* | Y coordinate |
-| `button` | `int \| str` | `1` | Button number or name |
-
-### mouse_button_up
-
-```python
-async def mouse_button_up(
-    self,
-    x: int,
-    y: int,
-    button: int | str = 1,
-) -> None
-```
-
-Release a mouse button.
-
-### mouse_wheel
-
-```python
-async def mouse_wheel(
-    self,
-    x: int,
-    y: int,
-    delta: int,
-) -> None
-```
-
-Scroll the mouse wheel.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `x` | `int` | X coordinate |
-| `y` | `int` | Y coordinate |
-| `delta` | `int` | Wheel delta (±120 per notch) |
-
-### mouse_drag
-
-```python
-async def mouse_drag(
-    self,
-    x1: int,
-    y1: int,
-    x2: int,
-    y2: int,
-    button: int = 1,
-) -> None
-```
-
-Drag the mouse from one position to another.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `x1, y1` | `int` | *required* | Starting position |
-| `x2, y2` | `int` | *required* | Ending position |
-| `button` | `int` | `1` | Button to hold |
+Scroll mouse wheel.

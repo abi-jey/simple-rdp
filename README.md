@@ -126,6 +126,35 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Video Streaming
+
+```python
+import asyncio
+import os
+from dotenv import load_dotenv
+from simple_rdp import RDPClient
+
+load_dotenv()
+
+async def main():
+    async with RDPClient(
+        host=os.environ["RDP_HOST"],
+        username=os.environ["RDP_USER"],
+        password=os.environ["RDP_PASS"],
+    ) as client:
+        print("Streaming video...")
+        
+        # Consume real-time video chunks (fragmented MP4)
+        while client.is_connected:
+            chunk = await client.get_next_video_chunk(timeout=1.0)
+            if chunk:
+                # Send chunk.data to websocket, write to file, etc.
+                pass
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
 ### Manual Connection Management
 
 ```python
@@ -178,6 +207,9 @@ RDPClient(
     width: int = 1920,
     height: int = 1080,
     color_depth: int = 32,
+    show_wallpaper: bool = False,
+    capture_fps: int = 30,
+    record_to: str | None = None,
 )
 ```
 
@@ -188,6 +220,8 @@ RDPClient(
 - `is_connected` - Whether the client is connected
 - `width` - Desktop width in pixels
 - `height` - Desktop height in pixels
+- `is_streaming` - Whether video streaming is active
+- `consumer_lag_chunks` - Number of queued video chunks (back-pressure indicator)
 
 #### Methods
 
@@ -195,6 +229,9 @@ RDPClient(
 - `disconnect()` - Disconnect from the server
 - `screenshot()` - Capture the current screen as a PIL Image
 - `save_screenshot(path)` - Save a screenshot to a file
+- `get_next_video_chunk(timeout)` - Get the next video chunk for real-time streaming
+- `get_pipeline_stats()` - Get detailed latency statistics
+- `transcode(input, output)` - Static utility to convert .ts recordings to .mp4
 - `send_key(key, is_press=True, is_release=True)` - Send a keyboard key
 - `send_text(text)` - Type a text string
 - `mouse_move(x, y)` - Move the mouse to a position
@@ -253,7 +290,7 @@ simple-rdp/
 │       ├── mcs.py           # MCS/T.125 layer
 │       ├── pdu.py           # RDP PDU layer
 │       ├── rle.py           # RLE bitmap decompression
-│       ├── screen.py        # Display class for video encoding
+│       ├── display.py       # Display class for video encoding
 │       └── input.py         # Input handling utilities
 ├── tests/
 │   ├── test_client.py       # Client unit tests
