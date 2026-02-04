@@ -187,6 +187,7 @@ class Display:
         self._ffmpeg_process: subprocess.Popen[bytes] | None = None
         self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
+        self._stderr_task: asyncio.Task[None] | None = None  # For ffmpeg error logging
         self._streaming = False  # Encoding to memory buffer for streaming
         self._shutting_down = False  # Flag to prevent writes during shutdown
         self._recording_to_file = False  # Recording taps into streaming output
@@ -558,7 +559,12 @@ class Display:
 
         # Start ffmpeg process
         # Input: raw RGB24 frames via stdin
-        # Output: H.264 fragmented MP4 to stdout (for MSE streaming)
+        # Output: H.264 in fragmented MP4 for MSE browser playback
+        # Key settings for low-latency streaming:
+        # - frag_keyframe: new fragment at each keyframe
+        # - empty_moov: no samples in initial moov (required for streaming)
+        # - frag_every_frame: fragment on every frame for lowest latency
+        # - -g 1: keyframe on EVERY frame initially to get video flowing fast
         cmd = [
             "ffmpeg",
             "-y",
@@ -577,29 +583,31 @@ class Display:
             "-preset",
             "ultrafast",  # Fastest encoding
             "-tune",
-            "zerolatency",  # Low latency
+            "zerolatency",  # Critical: outputs NALUs immediately
             "-pix_fmt",
             "yuv420p",
             "-crf",
-            "23",
+            "28",  # Slightly lower quality for faster encoding
             "-g",
-            "30",  # Keyframe every 30 frames (1 second at 30fps)
+            "15",  # Keyframe every 15 frames (0.5 sec at 30fps) - faster initial video
+            "-keyint_min",
+            "15",  # Minimum keyframe interval
             "-bf",
-            "0",  # Disable B-frames for lower latency
-            "-refs",
-            "1",  # Single reference frame for speed
-            "-rc-lookahead",
-            "0",  # No lookahead for lower latency
+            "0",  # No B-frames
+            "-flags",
+            "+cgop",  # Closed GOP
             "-f",
-            "mp4",  # MP4 container
+            "mp4",
             "-movflags",
-            "frag_keyframe+empty_moov+default_base_moof+faststart",  # Fragmented MP4 for streaming
+            "frag_keyframe+empty_moov+default_base_moof",
             "-frag_duration",
-            "100000",  # 100ms fragments for smoother playback
+            "33333",  # ~33ms fragments (one frame at 30fps)
+            "-min_frag_duration",
+            "0",  # Allow very small fragments
             "pipe:1",  # stdout
         ]
 
-        logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps")
+        logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps (fMP4)")
 
         # Calculate optimal buffer size (one frame worth of raw RGB data)
         frame_size = self._width * self._height * 3
@@ -608,12 +616,15 @@ class Display:
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,  # Suppress ffmpeg logs
+            stderr=subprocess.PIPE,  # Capture stderr for debugging
             bufsize=frame_size,  # Buffer one frame for better throughput
         )
 
         # Start reader task to consume ffmpeg output
         self._reader_task = asyncio.create_task(self._read_video_output())
+        
+        # Start stderr reader for debugging
+        self._stderr_task = asyncio.create_task(self._read_ffmpeg_stderr())
 
         logger.info("Streaming encoder started")
 
@@ -724,6 +735,35 @@ class Display:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
             self._reader_task = None
+
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stderr_task
+            self._stderr_task = None
+
+    async def _read_ffmpeg_stderr(self) -> None:
+        """Read and log ffmpeg stderr for debugging."""
+        loop = asyncio.get_event_loop()
+
+        def _read_stderr() -> bytes:
+            if self._ffmpeg_process and self._ffmpeg_process.stderr:
+                return self._ffmpeg_process.stderr.readline()
+            return b""
+
+        while self._streaming and self._ffmpeg_process:
+            try:
+                line = await loop.run_in_executor(None, _read_stderr)
+                if line:
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    if decoded:
+                        logger.debug(f"ffmpeg: {decoded}")
+                else:
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                break
 
     async def add_frame(self, image: Image.Image) -> None:
         """

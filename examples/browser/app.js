@@ -208,10 +208,13 @@ class RDPViewer {
                 this.mediaSource.addEventListener('error', reject, { once: true });
             });
             
+            console.log('MediaSource opened, readyState:', this.mediaSource.readyState);
+            
             // Add source buffer for H.264 in fragmented MP4 container
             // Try different codec strings for compatibility
             const codecs = [
-                'video/mp4; codecs="avc1.42E01E"',  // Baseline profile
+                'video/mp4; codecs="avc1.42E01E"',  // Baseline profile (most compatible)
+                'video/mp4; codecs="avc1.640028"',  // High profile L4.0
                 'video/mp4; codecs="avc1.4D401F"',  // Main profile
                 'video/mp4; codecs="avc1.64001F"',  // High profile
             ];
@@ -225,6 +228,8 @@ class RDPViewer {
                     } catch (e) {
                         console.warn(`Failed to add source buffer for ${codec}:`, e);
                     }
+                } else {
+                    console.log(`Codec not supported: ${codec}`);
                 }
             }
             
@@ -232,7 +237,7 @@ class RDPViewer {
                 throw new Error('Could not create source buffer for H.264/MP4');
             }
             
-            this.sourceBuffer.mode = 'sequence';
+            this.sourceBuffer.mode = 'segments';  // Changed from 'sequence' for fMP4
             this.sourceBuffer.addEventListener('updateend', () => this.processNextChunk());
             this.sourceBuffer.addEventListener('error', (e) => {
                 console.error('SourceBuffer error:', e);
@@ -241,6 +246,8 @@ class RDPViewer {
             this.videoStreamActive = true;
             this.pendingChunks = [];
             this.maxPendingChunks = 30;  // Limit pending chunks to prevent memory bloat
+            this.totalBytesReceived = 0;  // Track bytes for debugging
+            this.chunksAppended = 0;  // Track appended chunks
             
             // Start fetching the video stream
             this.fetchVideoStream();
@@ -267,6 +274,8 @@ class RDPViewer {
         
         this.videoWs.onopen = () => {
             console.log('Video WebSocket connected');
+            this.totalBytesReceived = 0;
+            this.firstChunkTime = null;
         };
         
         this.videoWs.onmessage = (event) => {
@@ -274,6 +283,17 @@ class RDPViewer {
                 // Binary video data
                 const chunk = new Uint8Array(event.data);
                 if (chunk.length > 0) {
+                    this.totalBytesReceived = (this.totalBytesReceived || 0) + chunk.length;
+                    
+                    // Log first chunk for debugging
+                    if (!this.firstChunkTime) {
+                        this.firstChunkTime = Date.now();
+                        console.log(`First video chunk received: ${chunk.length} bytes`);
+                        // Log first few bytes to verify it's fMP4 (should start with 'ftyp')
+                        const header = Array.from(chunk.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        console.log(`First 16 bytes: ${header}`);
+                    }
+                    
                     // Drop oldest chunks if queue is too long (back-pressure)
                     while (this.pendingChunks.length >= this.maxPendingChunks) {
                         this.pendingChunks.shift();
@@ -347,8 +367,17 @@ class RDPViewer {
         try {
             const chunk = this.pendingChunks.shift();
             this.sourceBuffer.appendBuffer(chunk);
+            this.chunksAppended = (this.chunksAppended || 0) + 1;
+            
+            // Log first few chunks and periodically for debugging
+            if (this.chunksAppended <= 5 || this.chunksAppended % 100 === 0) {
+                const buffered = this.sourceBuffer.buffered.length > 0 
+                    ? `${this.sourceBuffer.buffered.start(0).toFixed(2)}-${this.sourceBuffer.buffered.end(0).toFixed(2)}s`
+                    : 'empty';
+                console.log(`Chunk #${this.chunksAppended}: ${chunk.length} bytes, buffered: ${buffered}`);
+            }
         } catch (error) {
-            console.error('Error appending buffer:', error);
+            console.error('Error appending buffer:', error, 'chunk size:', this.pendingChunks[0]?.length);
             // If quota exceeded, remove old data aggressively
             if (error.name === 'QuotaExceededError' && this.sourceBuffer.buffered.length > 0) {
                 const start = this.sourceBuffer.buffered.start(0);
