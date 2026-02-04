@@ -622,7 +622,7 @@ class Display:
 
         # Start reader task to consume ffmpeg output
         self._reader_task = asyncio.create_task(self._read_video_output())
-        
+
         # Start stderr reader for debugging
         self._stderr_task = asyncio.create_task(self._read_ffmpeg_stderr())
 
