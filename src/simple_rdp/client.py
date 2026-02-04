@@ -16,6 +16,7 @@ from typing import Self
 
 from PIL import Image
 
+from simple_rdp._rle import decompress_rle
 from simple_rdp.capabilities import build_client_capabilities
 from simple_rdp.credssp import CredSSPAuth
 from simple_rdp.credssp import build_ts_request
@@ -48,7 +49,6 @@ from simple_rdp.pdu import PDUTYPE2_SUPPRESS_OUTPUT
 from simple_rdp.pdu import PDUTYPE2_SYNCHRONIZE
 from simple_rdp.pdu import PDUTYPE_CONFIRMACTIVEPDU
 from simple_rdp.pdu import PDUTYPE_DATAPDU
-from simple_rdp.rle import decompress_rle
 from simple_rdp.pdu import PDUTYPE_DEMANDACTIVEPDU
 from simple_rdp.pdu import PERF_DISABLE_WALLPAPER
 from simple_rdp.pdu import SEC_INFO_PKT
@@ -1470,7 +1470,7 @@ class RDPClient:
                 await self._apply_bitmap(bitmap)
             except Exception as e:
                 logger.debug(f"Error applying bitmap: {e}")
-        
+
         # Track timing
         update_time = time.perf_counter() - update_start
         self._bitmap_update_count += 1
@@ -1481,23 +1481,25 @@ class RDPClient:
         if now - self._last_bitmap_diag_time >= self._diag_interval:
             self._log_bitmap_diagnostics()
             self._last_bitmap_diag_time = now
-    
+
     def _log_bitmap_diagnostics(self) -> None:
         """Log bitmap update diagnostics."""
         if self._bitmap_update_count == 0:
             return
-        
+
         avg_update_ms = (self._bitmap_update_time_total / self._bitmap_update_count) * 1000
-        avg_rle_ms = (self._rle_decompress_time_total / self._bitmap_update_count) * 1000 if self._bitmap_update_count > 0 else 0
+        avg_rle_ms = (
+            (self._rle_decompress_time_total / self._bitmap_update_count) * 1000 if self._bitmap_update_count > 0 else 0
+        )
         updates_per_sec = self._bitmap_update_count / self._diag_interval
-        
+
         logger.info(
             f"📥 RDP Bitmaps: {updates_per_sec:.1f} updates/sec | "
             f"avg_update={avg_update_ms:.1f}ms | "
             f"avg_rle={avg_rle_ms:.1f}ms | "
             f"count={self._bitmap_update_count}"
         )
-        
+
         # Reset counters
         self._bitmap_update_count = 0
         self._bitmap_update_time_total = 0.0
@@ -1516,10 +1518,13 @@ class RDPClient:
         has_compression_header = not (flags & 0x0400)  # NO_BITMAP_COMPRESSION_HDR
 
         if is_compressed:
-            # Decompress using async Rust RLE - runs on tokio thread pool
+            # Decompress using sync Rust RLE on thread pool to avoid blocking event loop
             try:
                 rle_start = time.perf_counter()
-                data = await decompress_rle(data, width, height, bpp, has_compression_header)
+                loop = asyncio.get_running_loop()
+                data = await loop.run_in_executor(
+                    None, decompress_rle, data, width, height, bpp, has_compression_header
+                )
                 self._rle_decompress_time_total += time.perf_counter() - rle_start
             except Exception as e:
                 logger.debug(f"RLE decompression failed: {e}")

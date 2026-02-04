@@ -1,6 +1,6 @@
 """Tests for RLE decompression module."""
 
-from simple_rdp.rle import decompress_rle
+from simple_rdp._rle import decompress_rle
 
 
 class TestDecompressRle:
@@ -8,10 +8,10 @@ class TestDecompressRle:
 
     def test_decompress_rle_function_exists(self) -> None:
         """Test that the decompress_rle function is exported."""
-        from simple_rdp import rle
+        from simple_rdp import _rle
 
-        assert hasattr(rle, "decompress_rle")
-        assert callable(rle.decompress_rle)
+        assert hasattr(_rle, "decompress_rle")
+        assert callable(_rle.decompress_rle)
 
     def test_decompress_rle_with_valid_dimensions(self) -> None:
         """Test decompression with valid dimensions but empty data returns empty."""
@@ -28,6 +28,6 @@ class TestDecompressRle:
         """Test that decompress_rle is callable with correct args."""
         # Just verify the function signature is correct
         # We can't test actual decompression without valid RLE-encoded data
-        from simple_rdp.rle import decompress_rle
+        from simple_rdp._rle import decompress_rle
 
         assert callable(decompress_rle)

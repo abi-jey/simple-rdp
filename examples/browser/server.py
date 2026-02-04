@@ -7,7 +7,6 @@ Connects to an RDP server and streams H.264 video to the browser via MPEG-TS.
 import asyncio
 import contextlib
 import logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
 import os
 from collections.abc import AsyncGenerator
 from collections.abc import AsyncIterator
@@ -24,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from simple_rdp import RDPClient
 
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -215,10 +215,10 @@ async def connect_rdp() -> bool:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan - cleanup RDP on shutdown."""
     global shutdown_event
-    
+
     # Initialize shutdown event
     shutdown_event = asyncio.Event()
-    
+
     # RDP connection happens on-demand when browser clients connect
     logger.info("Server starting - RDP will connect when browser client connects")
 
@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Signal shutdown to all generators
     logger.info("Signaling shutdown...")
     shutdown_event.set()
-    
+
     # Give generators a moment to exit
     await asyncio.sleep(0.2)
 
@@ -298,23 +298,23 @@ async def connect() -> dict[str, str | bool | None]:
 async def video_stream_generator() -> AsyncIterator[bytes]:
     """
     Generator that yields fragmented MP4 video chunks from the Display streaming.
-    
+
     This uses the Display's efficient ffmpeg-based encoding which produces
     H.264 video in fragmented MP4 format for MSE browser compatibility.
-    
+
     RDP connection is established on-demand when the first browser client connects.
     """
     global rdp_client, video_streaming_clients, shutdown_event
-    
+
     video_streaming_clients += 1
     logger.info(f"Video stream client connected. Total: {video_streaming_clients}")
-    
+
     try:
         # Check if already shutting down
         if shutdown_event and shutdown_event.is_set():
             logger.info("Server is shutting down, not starting video stream")
             return
-        
+
         # Connect to RDP if not already connected (on-demand connection)
         if not rdp_client or not rdp_client.is_connected:
             logger.info("Browser client connected - initiating RDP connection...")
@@ -323,16 +323,16 @@ async def video_stream_generator() -> AsyncIterator[bytes]:
                 logger.error("Failed to connect to RDP server")
                 # Yield nothing and exit - client will see connection error
                 return
-        
+
         # Check shutdown again after connection
         if shutdown_event and shutdown_event.is_set():
             return
-        
+
         # Start streaming if not already active
         if rdp_client and rdp_client.is_connected and not rdp_client.is_streaming:
             await rdp_client.start_streaming()
             logger.info("Started video streaming for new client")
-        
+
         while not (shutdown_event and shutdown_event.is_set()):
             # Check connection state
             client = rdp_client
@@ -349,24 +349,24 @@ async def video_stream_generator() -> AsyncIterator[bytes]:
                 client = rdp_client
                 if client is None:
                     continue
-            
+
             if not client.is_streaming:
                 # Streaming not active, try to start it
                 await client.start_streaming()
                 await asyncio.sleep(0.1)
                 continue
-            
+
             # Get next video chunk from the display's streaming buffer
             chunk = await client.display.get_next_video_chunk(timeout=0.5)
-            
+
             if chunk:
                 yield chunk.data
             else:
                 # No chunk available, small sleep to avoid busy loop
                 await asyncio.sleep(0.01)
-        
+
         logger.info("Video stream generator exiting due to shutdown")
-                
+
     except asyncio.CancelledError:
         logger.info("Video stream cancelled")
     except Exception as e:
@@ -374,7 +374,7 @@ async def video_stream_generator() -> AsyncIterator[bytes]:
     finally:
         video_streaming_clients -= 1
         logger.info(f"Video stream client disconnected. Total: {video_streaming_clients}")
-        
+
         # Stop streaming if no more clients
         if video_streaming_clients <= 0 and rdp_client and rdp_client.is_streaming:
             await rdp_client.stop_streaming()
@@ -385,11 +385,11 @@ async def video_stream_generator() -> AsyncIterator[bytes]:
 async def video_stream() -> StreamingResponse:
     """
     HTTP endpoint for fragmented MP4 video streaming.
-    
+
     Uses the Display's ffmpeg-based H.264 encoding for efficient streaming.
     The browser can consume this directly with a <video> element using MSE
     (Media Source Extensions).
-    
+
     Content-Type: video/mp4 (fragmented MP4)
     """
     return StreamingResponse(
@@ -400,7 +400,7 @@ async def video_stream() -> StreamingResponse:
             "Pragma": "no-cache",
             "Expires": "0",
             "X-Content-Type-Options": "nosniff",
-        }
+        },
     )
 
 
@@ -408,22 +408,22 @@ async def video_stream() -> StreamingResponse:
 async def websocket_video(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for video streaming.
-    
+
     Sends binary video chunks over WebSocket for lower latency.
     Better connection state awareness and reconnection handling.
     """
     global rdp_client, video_streaming_clients, shutdown_event
-    
+
     await websocket.accept()
     video_streaming_clients += 1
     logger.info(f"Video WebSocket client connected. Total: {video_streaming_clients}")
-    
+
     try:
         # Check if already shutting down
         if shutdown_event and shutdown_event.is_set():
             await websocket.close(1001, "Server shutting down")
             return
-        
+
         # Connect to RDP if not already connected (on-demand connection)
         if not rdp_client or not rdp_client.is_connected:
             logger.info("Video client connected - initiating RDP connection...")
@@ -433,15 +433,15 @@ async def websocket_video(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "message": "Failed to connect to RDP"})
                 await websocket.close(1011, "RDP connection failed")
                 return
-        
+
         # Start streaming if not already active
         if rdp_client and rdp_client.is_connected and not rdp_client.is_streaming:
             await rdp_client.start_streaming()
             logger.info("Started video streaming for WebSocket client")
-        
+
         # Send ready message
         await websocket.send_json({"type": "ready", "message": "Video stream ready"})
-        
+
         # Stream video chunks
         while not (shutdown_event and shutdown_event.is_set()):
             client = rdp_client
@@ -456,23 +456,23 @@ async def websocket_video(websocket: WebSocket) -> None:
                 client = rdp_client
                 if client is None:
                     continue
-            
+
             if not client.is_streaming:
                 await client.start_streaming()
                 await asyncio.sleep(0.1)
                 continue
-            
+
             # Get next video chunk
             chunk = await client.display.get_next_video_chunk(timeout=0.5)
-            
+
             if chunk:
                 # Send binary video data
                 await websocket.send_bytes(chunk.data)
             else:
                 await asyncio.sleep(0.01)
-        
+
         logger.info("Video WebSocket closing due to shutdown")
-        
+
     except WebSocketDisconnect:
         logger.info("Video WebSocket client disconnected")
     except Exception as e:
@@ -480,7 +480,7 @@ async def websocket_video(websocket: WebSocket) -> None:
     finally:
         video_streaming_clients -= 1
         logger.info(f"Video WebSocket client disconnected. Total: {video_streaming_clients}")
-        
+
         # Stop streaming if no more clients
         if video_streaming_clients <= 0 and rdp_client and rdp_client.is_streaming:
             await rdp_client.stop_streaming()
@@ -491,7 +491,7 @@ async def websocket_video(websocket: WebSocket) -> None:
 async def stream_status() -> dict[str, Any]:
     """Get detailed video streaming status for diagnostics."""
     global rdp_client, video_streaming_clients
-    
+
     if not rdp_client:
         return {
             "streaming": False,
@@ -499,12 +499,12 @@ async def stream_status() -> dict[str, Any]:
             "video_clients": video_streaming_clients,
             "stats": None,
         }
-    
+
     display_stats = rdp_client.display.stats if rdp_client.display else {}
-    
+
     # Calculate rates
     server_fps = rdp_client.display.effective_fps if rdp_client.display else 0
-    
+
     return {
         "streaming": rdp_client.is_streaming if rdp_client else False,
         "connected": rdp_client.is_connected if rdp_client else False,
@@ -596,6 +596,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 if __name__ == "__main__":
     import signal
     import sys
+
     import uvicorn
 
     def signal_handler(sig: int, frame: object) -> None:

@@ -205,7 +205,7 @@ class Display:
         self._session_start_time: float = time.time()  # When display was created
         self._recording_start_time: float | None = None
         self._first_frame_time: float | None = None
-        
+
         # Diagnostic tracking
         self._last_diag_time: float = 0.0
         self._diag_interval: float = 5.0  # Log diagnostics every 5 seconds
@@ -363,12 +363,9 @@ class Display:
             return
 
         # Reuse existing consumer buffer if same size, otherwise create new
-        if (
-            self._consumer_buffer is None 
-            or self._consumer_buffer.size != self._screen_buffer.size
-        ):
+        if self._consumer_buffer is None or self._consumer_buffer.size != self._screen_buffer.size:
             self._consumer_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
-        
+
         # Paste screen buffer onto consumer buffer (faster than copy())
         self._consumer_buffer.paste(self._screen_buffer, (0, 0))
 
@@ -606,7 +603,7 @@ class Display:
 
         # Calculate optimal buffer size (one frame worth of raw RGB data)
         frame_size = self._width * self._height * 3
-        
+
         self._ffmpeg_process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -781,12 +778,7 @@ class Display:
             self._stats["frames_received"] += 1
 
         # Send to ffmpeg if encoding (skip if shutting down or not streaming)
-        if (
-            self._streaming
-            and not self._shutting_down
-            and self._ffmpeg_process
-            and self._ffmpeg_process.stdin
-        ):
+        if self._streaming and not self._shutting_down and self._ffmpeg_process and self._ffmpeg_process.stdin:
             try:
                 encode_start = time.perf_counter()
                 # Use run_in_executor to avoid blocking the event loop
@@ -797,32 +789,32 @@ class Display:
                 self._encode_time_total += encode_time
                 self._frames_since_diag += 1
                 self._stats["frames_encoded"] += 1
-                
+
                 # Log diagnostics periodically
                 now = time.time()
                 if now - self._last_diag_time >= self._diag_interval:
                     self._log_diagnostics()
                     self._last_diag_time = now
-                    
+
             except (BrokenPipeError, OSError):
                 # Expected during shutdown - silently ignore
                 pass
-    
+
     def _log_diagnostics(self) -> None:
         """Log backend pipeline diagnostics."""
         if self._frames_since_diag == 0:
             return
-            
+
         avg_encode_ms = (self._encode_time_total / self._frames_since_diag) * 1000
         target_frame_time_ms = 1000 / self._fps
-        
+
         # Calculate if we're ahead or behind
         headroom_ms = target_frame_time_ms - avg_encode_ms
         status = "✅ AHEAD" if headroom_ms > 0 else "⚠️ BEHIND"
-        
+
         queue_size = self._video_queue.qsize()
         queue_status = "ok" if queue_size < 50 else "⚠️ HIGH" if queue_size < 90 else "🔴 FULL"
-        
+
         logger.info(
             f"📊 Backend: {status} by {abs(headroom_ms):.1f}ms | "
             f"encode={avg_encode_ms:.1f}ms/frame | "
@@ -831,7 +823,7 @@ class Display:
             f"drops={self._stats['queue_drops']} | "
             f"fps_in={self._frames_since_diag / self._diag_interval:.1f}"
         )
-        
+
         # Reset counters
         self._frames_since_diag = 0
         self._encode_time_total = 0.0

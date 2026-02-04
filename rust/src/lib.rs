@@ -486,9 +486,9 @@ fn decompress_rle<'py>(
     // Copy input data so we can release the GIL
     let input_copy = compressed_data.to_vec();
 
-    // Release the GIL during heavy computation
+    // Release the GIL during heavy computation using py.detach()
     // This allows other Python threads (including asyncio internals) to run
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         let mut decoder = RleDecoder::new(&input_copy, width, height, bpp, has_header);
         decoder.decompress()
     });
