@@ -207,7 +207,7 @@ class RDPSession:
             height=self.config.height,
             fps=30,
         )
-        await self.display.start_encoding()
+        await self.display.start_streaming()
         self._recording = True
 
         # Start background task to capture frames
@@ -227,17 +227,12 @@ class RDPSession:
                 await self._frame_task
             self._frame_task = None
 
-        # Stop encoding
+        # Stop streaming
         if self.display:
-            await self.display.stop_encoding()
-
-            # Save if path provided
-            if save_path:
-                success = await self.display.save_video(save_path)
-                if success:
-                    return save_path
-
+            await self.display.stop_streaming(record_to=save_path)
             self.display = None
+            if save_path:
+                return save_path
 
         return None
 
@@ -345,7 +340,7 @@ async def connect(
     }
 
 
-async def disconnect() -> dict[str, str | bool]:
+async def disconnect() -> dict[str, str | bool | None]:
     """
     Disconnect from the current RDP session.
 

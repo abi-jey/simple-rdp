@@ -1,34 +1,18 @@
-"""Tests for Screen and Display classes."""
+"""Tests for Display class (screen-related functionality)."""
 
 from simple_rdp.display import Display
-from simple_rdp.display import ScreenBuffer
+from simple_rdp.display import PipelineStats
 
 
-class TestScreenBuffer:
-    """Tests for ScreenBuffer dataclass."""
-
-    def test_screen_buffer_creation(self):
-        """Test ScreenBuffer can be created with required fields."""
-        buffer = ScreenBuffer(width=1920, height=1080, data=b"\x00" * 100)
-        assert buffer.width == 1920
-        assert buffer.height == 1080
-        assert buffer.format == "RGB"
-
-    def test_screen_buffer_custom_format(self):
-        """Test ScreenBuffer with custom format."""
-        buffer = ScreenBuffer(width=800, height=600, data=b"\x00", format="RGBA")
-        assert buffer.format == "RGBA"
-
-
-class TestDisplay:
-    """Tests for Display class."""
+class TestDisplayScreen:
+    """Tests for Display class screen functionality."""
 
     def test_initial_state(self):
         """Test initial state of Display."""
         display = Display(width=1920, height=1080)
         assert display.width == 1920
         assert display.height == 1080
-        assert display.frame_count == 0
+        assert display.is_streaming is False
 
     def test_display_stats(self):
         """Test display statistics."""
@@ -36,4 +20,13 @@ class TestDisplay:
         stats = display.stats
         assert stats["frames_received"] == 0
         assert stats["frames_encoded"] == 0
-        assert stats["encoding_errors"] == 0
+        assert stats["chunks_produced"] == 0
+        assert stats["queue_drops"] == 0
+
+    def test_get_pipeline_stats(self):
+        """Test get_pipeline_stats returns PipelineStats."""
+        display = Display(width=1920, height=1080, fps=30)
+        stats = display.get_pipeline_stats()
+        assert isinstance(stats, PipelineStats)
+        assert stats.frames_received == 0
+        assert stats.frames_encoded == 0

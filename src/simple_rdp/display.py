@@ -4,19 +4,44 @@ Display - Handles screen capture and video encoding from RDP sessions.
 Provides a Display class that manages:
 - Screen buffer (PIL Image of current screen state)
 - Screenshot capture
-- Raw frame buffer for video
 - Live ffmpeg video encoding via subprocess
-- Async video output queue with 100MB cap
+- Async video output queue for real-time streaming
+- Automatic temp file recording with optional transcode on cleanup
+
+Architecture:
+    Bitmap Update → _raw_display_image (clean desktop)
+                          ↓
+                  _final_display_image (desktop + pointer)
+                          ↓
+                     add_frame()
+                          ↓
+                    ffmpeg stdin
+                          ↓
+                    ffmpeg stdout
+                          ↓
+              ┌───────────┴───────────┐
+              ↓                       ↓
+        _video_queue              temp .ts file
+              ↓                       ↓
+    get_next_video_chunk()      transcode to MP4
+                                  (on cleanup)
+
+Consumer Lag Detection:
+    The video queue holds up to ~20 seconds of encoded video chunks.
+    Use `consumer_lag_chunks` property to check how far behind a consumer is.
+    A lag of >10 chunks indicates the consumer is falling behind.
+    If the queue fills up, new chunks are dropped (back-pressure).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import subprocess
+import tempfile
 import time
 from asyncio import Queue
-from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
 from logging import getLogger
@@ -92,22 +117,6 @@ def _get_default_pointer() -> Image.Image:
 
 
 @dataclass
-class ScreenBuffer:
-    """Represents a captured screen frame."""
-
-    width: int
-    height: int
-    data: bytes
-    format: str = "RGB"
-    timestamp: float = field(default_factory=time.time)  # Wall-clock time
-
-    @property
-    def size_bytes(self) -> int:
-        """Return the size of the raw data in bytes."""
-        return len(self.data)
-
-
-@dataclass
 class VideoChunk:
     """A chunk of encoded video data."""
 
@@ -120,6 +129,42 @@ class VideoChunk:
         return len(self.data)
 
 
+@dataclass
+class PipelineStats:
+    """
+    Statistics for the video encoding pipeline.
+
+    These stats help diagnose latency and throughput issues in the
+    bitmap → display → ffmpeg → output pipeline.
+
+    Attributes:
+        bitmap_to_buffer_ms: Average time to decompress and apply bitmap updates.
+        frame_to_ffmpeg_ms: Average time to write a frame to ffmpeg stdin.
+        ffmpeg_latency_ms: Estimated ffmpeg processing latency (input to output).
+        total_e2e_estimate_ms: Estimated total end-to-end latency.
+        frames_received: Total frames received from capture loop.
+        frames_encoded: Total frames written to ffmpeg.
+        chunks_produced: Total video chunks produced by ffmpeg.
+        queue_drops: Number of chunks dropped due to full queue.
+        bitmaps_applied: Number of bitmap updates applied to display.
+        consumer_lag_chunks: Current number of chunks waiting in queue.
+    """
+
+    bitmap_to_buffer_ms: float = 0.0
+    frame_to_ffmpeg_ms: float = 0.0
+    ffmpeg_latency_ms: float = 0.0
+    total_e2e_estimate_ms: float = field(init=False)
+    frames_received: int = 0
+    frames_encoded: int = 0
+    chunks_produced: int = 0
+    queue_drops: int = 0
+    bitmaps_applied: int = 0
+    consumer_lag_chunks: int = 0
+
+    def __post_init__(self) -> None:
+        self.total_e2e_estimate_ms = self.bitmap_to_buffer_ms + self.frame_to_ffmpeg_ms + self.ffmpeg_latency_ms
+
+
 class Display:
     """
     Manages screen capture and video encoding.
@@ -127,23 +172,44 @@ class Display:
     Features:
     - Screen buffer (PIL Image representing current screen state)
     - Screenshot capture and saving
-    - Raw frame buffer (stores uncompressed RGB data for speed)
-    - Live ffmpeg encoding to H.264 video stream
-    - Async video output queue with configurable size limit
-    - Automatic old data eviction when buffer exceeds limit
+    - Live ffmpeg encoding to fragmented MP4 video stream
+    - Async video output queue for real-time streaming consumers
+    - Automatic temp file recording for full session capture
+    - Optional transcode to MP4 on cleanup
+
+    Video Pipeline:
+        The display maintains two image buffers:
+        - _raw_display_image: The clean desktop image from RDP bitmap updates
+        - _final_display_image: The desktop with pointer composited (for output)
+
+        When streaming is active, frames are:
+        1. Captured at fixed FPS from _final_display_image
+        2. Written to ffmpeg stdin as raw RGB
+        3. Encoded to H.264 fragmented MP4
+        4. Output chunks are written to both:
+           - A temp .ts file (always, for full session recording)
+           - An async queue (for real-time streaming via get_next_video_chunk())
+
+    Consumer Lag:
+        The video queue can hold ~600 chunks (~20 seconds at 30fps).
+        Use `consumer_lag_chunks` to monitor how far behind a consumer is:
+        - 0-10 chunks: Consumer is keeping up well
+        - 10-50 chunks: Consumer is slightly behind (acceptable)
+        - 50+ chunks: Consumer is significantly behind (may miss data)
+        - Queue full (600): New chunks are dropped (back-pressure)
+
+        Call `is_consumer_behind()` for a simple boolean check.
     """
 
-    # Default buffer limits
-    DEFAULT_MAX_VIDEO_BUFFER_MB = 100
-    DEFAULT_RAW_BUFFER_SECONDS = 10  # Keep ~10 seconds of raw frames
+    # Queue size: ~20 seconds at 30fps = 600 chunks
+    DEFAULT_QUEUE_SIZE = 600
 
     def __init__(
         self,
         width: int = 1920,
         height: int = 1080,
         fps: int = 30,
-        max_video_buffer_mb: float = DEFAULT_MAX_VIDEO_BUFFER_MB,
-        max_raw_frames: int | None = None,
+        queue_size: int = DEFAULT_QUEUE_SIZE,
     ) -> None:
         """
         Initialize the display manager.
@@ -152,22 +218,20 @@ class Display:
             width: Frame width in pixels.
             height: Frame height in pixels.
             fps: Target frames per second for video encoding.
-            max_video_buffer_mb: Maximum video buffer size in MB before eviction.
-            max_raw_frames: Maximum raw frames to buffer. Defaults to fps * 10 (~10 seconds).
+            queue_size: Maximum video chunks in queue before dropping.
+                        Default is 600 (~20 seconds at 30fps).
         """
         self._width = width
         self._height = height
         self._fps = fps
-        self._max_video_buffer_bytes = int(max_video_buffer_mb * 1024 * 1024)
-        # Default to ~10 seconds of buffer based on fps
-        self._max_raw_frames = max_raw_frames if max_raw_frames is not None else fps * self.DEFAULT_RAW_BUFFER_SECONDS
+        self._queue_size = queue_size
 
         # Screen buffers:
-        # - _screen_buffer: raw screen state from RDP bitmap updates (no pointer)
-        # - _consumer_buffer: screen + pointer composited (for screenshots/video)
-        self._screen_buffer: Image.Image | None = None
-        self._consumer_buffer: Image.Image | None = None
-        self._consumer_buffer_dirty: bool = True  # Needs redraw
+        # - _raw_display_image: raw screen state from RDP bitmap updates (no pointer)
+        # - _final_display_image: screen + pointer composited (for screenshots/video)
+        self._raw_display_image: Image.Image | None = None
+        self._final_display_image: Image.Image | None = None
+        self._final_display_image_dirty: bool = True  # Needs redraw
         self._screen_lock = asyncio.Lock()
 
         # Pointer state and rate limiting
@@ -179,56 +243,49 @@ class Display:
         self._last_pointer_update: float = 0.0
         self._pointer_update_interval: float = 1.0 / fps  # Cap to FPS
 
-        # Raw frame storage (deque for O(1) append and popleft)
-        self._raw_frames: deque[ScreenBuffer] = deque(maxlen=max_raw_frames)
-        self._frame_count = 0
-
         # Video encoding state
         self._ffmpeg_process: subprocess.Popen[bytes] | None = None
-        self._encoding_task: asyncio.Task[None] | None = None
         self._reader_task: asyncio.Task[None] | None = None
-        self._stderr_task: asyncio.Task[None] | None = None  # For ffmpeg error logging
-        self._streaming = False  # Encoding to memory buffer for streaming
-        self._shutting_down = False  # Flag to prevent writes during shutdown
-        self._recording_to_file = False  # Recording taps into streaming output
-        self._recording_path: str | None = None  # Path for file recording
-        self._recording_file: IO[bytes] | None = None  # File handle for recording
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._streaming = False
+        self._shutting_down = False
 
-        # Video output buffer (chunked encoded video for streaming)
-        self._video_chunks: deque[VideoChunk] = deque()
-        self._video_buffer_size = 0
+        # Temp file for recording (always used when streaming)
+        self._temp_file: IO[bytes] | None = None
+        self._temp_file_path: str | None = None
+
+        # Async queue for video chunks (real-time streaming consumers)
+        self._video_queue: Queue[VideoChunk] = Queue(maxsize=queue_size)
         self._chunk_sequence = 0
 
-        # Async queue for new chunks (for consumers)
-        self._video_queue: Queue[VideoChunk] = Queue(maxsize=100)  # Bounded queue
-
-        # Session and recording timing (wall-clock times)
-        self._session_start_time: float = time.time()  # When display was created
+        # Timing for stats
+        self._session_start_time: float = time.time()
         self._recording_start_time: float | None = None
         self._first_frame_time: float | None = None
 
+        # Pipeline latency tracking
+        self._bitmap_apply_times: list[float] = []  # Rolling window
+        self._frame_write_times: list[float] = []  # Rolling window
+        self._ffmpeg_latency_samples: list[float] = []  # Rolling window
+        self._last_stdin_write_time: float = 0.0
+        self._max_latency_samples = 100  # Keep last 100 samples
+
         # Diagnostic tracking
         self._last_diag_time: float = 0.0
-        self._diag_interval: float = 5.0  # Log diagnostics every 5 seconds
+        self._diag_interval: float = 5.0
         self._frames_since_diag: int = 0
         self._encode_time_total: float = 0.0
-        self._queue_drops: int = 0
 
-        # Stats
+        # Stats counters
         self._stats = {
             "frames_received": 0,
             "frames_encoded": 0,
-            "bytes_encoded": 0,
-            "chunks_evicted": 0,
-            "encoding_errors": 0,
+            "chunks_produced": 0,
+            "queue_drops": 0,
             "bitmaps_applied": 0,
             "pointer_updates": 0,
             "pointer_updates_throttled": 0,
-            "queue_drops": 0,
         }
-
-        # Lock for thread-safe frame access
-        self._frame_lock = asyncio.Lock()
 
     @property
     def width(self) -> int:
@@ -243,94 +300,21 @@ class Display:
         return self._fps
 
     @property
-    def frame_count(self) -> int:
-        return self._frame_count
-
-    @property
-    def raw_frame_count(self) -> int:
-        return len(self._raw_frames)
-
-    @property
-    def max_raw_frames(self) -> int:
-        """Maximum number of raw frames that can be buffered."""
-        return self._max_raw_frames
-
-    @property
-    def raw_buffer_seconds(self) -> float:
-        """Current raw frame buffer size in seconds (based on fps)."""
-        return len(self._raw_frames) / self._fps if self._fps > 0 else 0.0
-
-    @property
-    def max_raw_buffer_seconds(self) -> float:
-        """Maximum raw frame buffer size in seconds."""
-        return self._max_raw_frames / self._fps if self._fps > 0 else 0.0
-
-    @property
-    def video_buffer_size_mb(self) -> float:
-        return self._video_buffer_size / (1024 * 1024)
-
-    @property
-    def stats(self) -> dict[str, int]:
-        return self._stats.copy()
-
-    @property
     def is_streaming(self) -> bool:
-        """True if streaming to memory buffer is active."""
+        """True if video encoding/streaming is active."""
         return self._streaming and self._ffmpeg_process is not None
 
     @property
-    def is_file_recording(self) -> bool:
-        """True if recording directly to file is active."""
-        return self._recording_to_file
-
-    @property
-    def is_encoding(self) -> bool:
-        """True if any encoding (streaming or file recording) is active."""
-        return self._ffmpeg_process is not None
-
-    @property
     def recording_duration_seconds(self) -> float:
-        """Return how long encoding (streaming or file) has been active."""
+        """Return how long encoding has been active."""
         if self._recording_start_time is None:
             return 0.0
         return time.time() - self._recording_start_time
 
     @property
     def session_duration_seconds(self) -> float:
-        """Return how long since the session started (wall-clock)."""
+        """Return how long since the display was created (wall-clock)."""
         return time.time() - self._session_start_time
-
-    @property
-    def session_start_time(self) -> float:
-        """Return the wall-clock timestamp when the session started."""
-        return self._session_start_time
-
-    @property
-    def buffer_time_range(self) -> tuple[float, float]:
-        """
-        Return the time range of buffered frames as (oldest_time, newest_time).
-
-        Times are relative to session start (in seconds).
-        Returns (0, 0) if no frames are buffered.
-        """
-        if not self._raw_frames:
-            return (0.0, 0.0)
-        oldest = self._raw_frames[0].timestamp - self._session_start_time
-        newest = self._raw_frames[-1].timestamp - self._session_start_time
-        return (oldest, newest)
-
-    @property
-    def buffer_delay_seconds(self) -> float:
-        """
-        Return the delay between oldest buffered frame and now.
-
-        This indicates how far behind real-time the buffer is.
-        Returns 0 if no frames are buffered.
-        """
-        if not self._raw_frames:
-            return 0.0
-        oldest_frame = self._raw_frames[0]
-        return time.time() - oldest_frame.timestamp
 
     @property
     def effective_fps(self) -> float:
@@ -348,31 +332,103 @@ class Display:
         return self._stats["frames_received"] / elapsed
 
     @property
-    def screen_buffer(self) -> Image.Image | None:
-        """Return the current screen buffer (may be None if not initialized)."""
-        return self._screen_buffer
+    def consumer_lag_chunks(self) -> int:
+        """
+        Return the number of chunks waiting in the queue.
+
+        This indicates how far behind a consumer calling get_next_video_chunk() is:
+        - 0-10: Consumer is keeping up well
+        - 10-50: Consumer is slightly behind
+        - 50+: Consumer is significantly behind
+        - 600 (queue full): Chunks are being dropped
+
+        Use is_consumer_behind() for a simple boolean check.
+        """
+        return self._video_queue.qsize()
+
+    def is_consumer_behind(self, threshold: int = 10) -> bool:
+        """
+        Check if the consumer is falling behind.
+
+        Args:
+            threshold: Number of queued chunks considered "behind". Default is 10.
+
+        Returns:
+            True if consumer_lag_chunks > threshold.
+
+        Example:
+            >>> if display.is_consumer_behind():
+            ...     logger.warning("Video consumer is falling behind!")
+        """
+        return self._video_queue.qsize() > threshold
+
+    @property
+    def stats(self) -> dict[str, int]:
+        """Return current statistics counters."""
+        return self._stats.copy()
+
+    def get_pipeline_stats(self) -> PipelineStats:
+        """
+        Get detailed pipeline statistics including latency measurements.
+
+        Returns:
+            PipelineStats dataclass with timing and counter information.
+
+        Example:
+            >>> stats = display.get_pipeline_stats()
+            >>> print(f"E2E latency: {stats.total_e2e_estimate_ms:.1f}ms")
+            >>> print(f"Consumer lag: {stats.consumer_lag_chunks} chunks")
+        """
+        # Calculate averages from rolling windows
+        avg_bitmap = (
+            sum(self._bitmap_apply_times) / len(self._bitmap_apply_times) * 1000 if self._bitmap_apply_times else 0.0
+        )
+        avg_frame = (
+            sum(self._frame_write_times) / len(self._frame_write_times) * 1000 if self._frame_write_times else 0.0
+        )
+        avg_ffmpeg = (
+            sum(self._ffmpeg_latency_samples) / len(self._ffmpeg_latency_samples) * 1000
+            if self._ffmpeg_latency_samples
+            else 0.0
+        )
+
+        return PipelineStats(
+            bitmap_to_buffer_ms=avg_bitmap,
+            frame_to_ffmpeg_ms=avg_frame,
+            ffmpeg_latency_ms=avg_ffmpeg,
+            frames_received=self._stats["frames_received"],
+            frames_encoded=self._stats["frames_encoded"],
+            chunks_produced=self._stats["chunks_produced"],
+            queue_drops=self._stats["queue_drops"],
+            bitmaps_applied=self._stats["bitmaps_applied"],
+            consumer_lag_chunks=self._video_queue.qsize(),
+        )
+
+    @property
+    def raw_display_image(self) -> Image.Image | None:
+        """Return the raw display image (may be None if not initialized)."""
+        return self._raw_display_image
 
     def initialize_screen(self) -> None:
         """Initialize the screen buffers with black images."""
-        self._screen_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
-        self._consumer_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
-        self._consumer_buffer_dirty = True
+        self._raw_display_image = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        self._final_display_image = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        self._final_display_image_dirty = True
 
-    def _update_consumer_buffer(self) -> None:
-        """Update the consumer buffer with screen + pointer composited."""
-        if self._screen_buffer is None:
+    def _update_final_display_image(self) -> None:
+        """Update the final display image with screen + pointer composited."""
+        if self._raw_display_image is None:
             return
 
-        # Reuse existing consumer buffer if same size, otherwise create new
-        if self._consumer_buffer is None or self._consumer_buffer.size != self._screen_buffer.size:
-            self._consumer_buffer = Image.new("RGB", (self._width, self._height), (0, 0, 0))
+        # Reuse existing buffer if same size, otherwise create new
+        if self._final_display_image is None or self._final_display_image.size != self._raw_display_image.size:
+            self._final_display_image = Image.new("RGB", (self._width, self._height), (0, 0, 0))
 
-        # Paste screen buffer onto consumer buffer (faster than copy())
-        self._consumer_buffer.paste(self._screen_buffer, (0, 0))
+        # Paste raw display onto final buffer
+        self._final_display_image.paste(self._raw_display_image, (0, 0))
 
         # Composite pointer if visible
         if self._pointer_visible:
-            # Use custom pointer if available, otherwise use default arrow
             pointer = self._pointer_image if self._pointer_image is not None else _get_default_pointer()
             hotspot = self._pointer_hotspot if self._pointer_image is not None else (0, 0)
 
@@ -383,15 +439,14 @@ class Display:
             # Only paste if within bounds
             if -pointer.width < px < self._width and -pointer.height < py < self._height:
                 try:
-                    # Use alpha composite if pointer has alpha channel
                     if pointer.mode == "RGBA":
-                        self._consumer_buffer.paste(pointer, (px, py), pointer)
+                        self._final_display_image.paste(pointer, (px, py), pointer)
                     else:
-                        self._consumer_buffer.paste(pointer, (px, py))
+                        self._final_display_image.paste(pointer, (px, py))
                 except Exception as e:
                     logger.debug(f"Error compositing pointer: {e}")
 
-        self._consumer_buffer_dirty = False
+        self._final_display_image_dirty = False
 
     def update_pointer(
         self,
@@ -405,18 +460,18 @@ class Display:
         Update pointer state with FPS-based rate limiting.
 
         Args:
-            x: New X position (or None to keep current)
-            y: New Y position (or None to keep current)
-            visible: Visibility state (or None to keep current)
-            image: New pointer image (or None to keep current)
-            hotspot: New hotspot (or None to keep current)
+            x: New X position (or None to keep current).
+            y: New Y position (or None to keep current).
+            visible: Visibility state (or None to keep current).
+            image: New pointer image (or None to keep current).
+            hotspot: New hotspot (or None to keep current).
 
         Returns:
-            True if update was applied, False if throttled
+            True if update was applied, False if throttled.
         """
         now = time.time()
 
-        # Check rate limit for position-only updates (combine conditions per SIM102)
+        # Check rate limit for position-only updates
         is_position_only = image is None and hotspot is None and visible is None
         if is_position_only and now - self._last_pointer_update < self._pointer_update_interval:
             self._stats["pointer_updates_throttled"] += 1
@@ -435,7 +490,7 @@ class Display:
             self._pointer_hotspot = hotspot
 
         self._last_pointer_update = now
-        self._consumer_buffer_dirty = True
+        self._final_display_image_dirty = True
         self._stats["pointer_updates"] += 1
         return True
 
@@ -447,16 +502,15 @@ class Display:
             PIL Image of the current screen state with pointer overlay.
         """
         async with self._screen_lock:
-            if self._screen_buffer is None:
+            if self._raw_display_image is None:
                 return Image.new("RGB", (self._width, self._height), (0, 0, 0))
 
-            # Update consumer buffer if dirty
-            if self._consumer_buffer_dirty or self._consumer_buffer is None:
-                self._update_consumer_buffer()
+            # Update final display image if dirty
+            if self._final_display_image_dirty or self._final_display_image is None:
+                self._update_final_display_image()
 
-            # At this point consumer_buffer is guaranteed to be set by _update_consumer_buffer
-            assert self._consumer_buffer is not None
-            return self._consumer_buffer.copy()
+            assert self._final_display_image is not None
+            return self._final_display_image.copy()
 
     async def save_screenshot(self, path: str) -> None:
         """
@@ -492,12 +546,13 @@ class Display:
             data: Raw bitmap data (already decompressed, RGB format).
             bpp: Bits per pixel of the source data.
         """
+        apply_start = time.perf_counter()
+
         async with self._screen_lock:
-            if self._screen_buffer is None:
+            if self._raw_display_image is None:
                 self.initialize_screen()
 
-            # After initialization, screen_buffer should exist
-            if self._screen_buffer is None:
+            if self._raw_display_image is None:
                 return
 
             try:
@@ -528,43 +583,45 @@ class Display:
                 # Flip vertically (RDP sends bottom-up)
                 img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
-                # Paste onto screen buffer
-                self._screen_buffer.paste(img, (x, y))
+                # Paste onto raw display image
+                self._raw_display_image.paste(img, (x, y))
                 self._stats["bitmaps_applied"] += 1
-                self._consumer_buffer_dirty = True  # Mark for redraw with pointer
-
-                # Note: Raw frame capture is handled by RDPClient's capture loop at fixed FPS
-                # If encoding is active, frames are sent to ffmpeg in add_frame()
+                self._final_display_image_dirty = True
 
             except Exception as e:
                 logger.debug(f"Error applying bitmap: {e}")
 
+        # Track bitmap apply time
+        apply_time = time.perf_counter() - apply_start
+        self._bitmap_apply_times.append(apply_time)
+        if len(self._bitmap_apply_times) > self._max_latency_samples:
+            self._bitmap_apply_times.pop(0)
+
     async def start_streaming(self) -> None:
         """
-        Start streaming video to memory buffer.
+        Start video streaming.
 
-        Frames are encoded to fragmented MP4 format and stored in chunks for
-        live consumption via get_next_video_chunk().
+        Frames are encoded to fragmented MP4 format. Output is available via:
+        - get_next_video_chunk(): Real-time streaming to consumers
+        - Temp file: Full session recording (transcoded on cleanup if record_to set)
 
-        This is ideal for real-time streaming to network consumers.
-        For recording directly to a file, use start_file_recording().
+        Use stop_streaming() to stop encoding.
         """
-        if self._streaming or self._recording_to_file:
-            logger.warning("Encoding already active")
+        if self._streaming:
+            logger.warning("Streaming already active")
             return
 
         self._streaming = True
-        self._recording_start_time = time.time()  # Wall-clock time
-        self._first_frame_time = None  # Reset for new session
+        self._recording_start_time = time.time()
+        self._first_frame_time = None
+        self._shutting_down = False
+
+        # Create temp file for recording
+        fd, self._temp_file_path = tempfile.mkstemp(suffix=".ts", prefix="rdp_recording_")
+        self._temp_file = os.fdopen(fd, "wb")
+        logger.debug(f"Recording to temp file: {self._temp_file_path}")
 
         # Start ffmpeg process
-        # Input: raw RGB24 frames via stdin
-        # Output: H.264 in fragmented MP4 for MSE browser playback
-        # Key settings for low-latency streaming:
-        # - frag_keyframe: new fragment at each keyframe
-        # - empty_moov: no samples in initial moov (required for streaming)
-        # - frag_every_frame: fragment on every frame for lowest latency
-        # - -g 1: keyframe on EVERY frame initially to get video flowing fast
         cmd = [
             "ffmpeg",
             "-y",
@@ -577,152 +634,109 @@ class Display:
             "-r",
             str(self._fps),
             "-i",
-            "pipe:0",  # stdin
+            "pipe:0",
             "-c:v",
             "libx264",
             "-preset",
-            "ultrafast",  # Fastest encoding
+            "ultrafast",
             "-tune",
-            "zerolatency",  # Critical: outputs NALUs immediately
+            "zerolatency",
             "-pix_fmt",
             "yuv420p",
             "-crf",
-            "28",  # Slightly lower quality for faster encoding
+            "28",
             "-g",
-            "15",  # Keyframe every 15 frames (0.5 sec at 30fps) - faster initial video
+            "15",
             "-keyint_min",
-            "15",  # Minimum keyframe interval
+            "15",
             "-bf",
-            "0",  # No B-frames
+            "0",
             "-flags",
-            "+cgop",  # Closed GOP
+            "+cgop",
             "-f",
             "mp4",
             "-movflags",
             "frag_keyframe+empty_moov+default_base_moof",
             "-frag_duration",
-            "33333",  # ~33ms fragments (one frame at 30fps)
+            "33333",
             "-min_frag_duration",
-            "0",  # Allow very small fragments
-            "pipe:1",  # stdout
+            "0",
+            "pipe:1",
         ]
 
         logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps (fMP4)")
 
-        # Calculate optimal buffer size (one frame worth of raw RGB data)
         frame_size = self._width * self._height * 3
-
         self._ffmpeg_process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,  # Capture stderr for debugging
-            bufsize=frame_size,  # Buffer one frame for better throughput
+            stderr=subprocess.PIPE,
+            bufsize=frame_size,
         )
 
         # Start reader task to consume ffmpeg output
         self._reader_task = asyncio.create_task(self._read_video_output())
-
-        # Start stderr reader for debugging
         self._stderr_task = asyncio.create_task(self._read_ffmpeg_stderr())
 
         logger.info("Streaming encoder started")
 
-    async def start_file_recording(self, path: str) -> None:
+    async def stop_streaming(self, record_to: str | None = None) -> None:
         """
-        Start recording video to a file.
-
-        Recording taps into the streaming output - chunks are written to both
-        the memory buffer and the file. If streaming is not active, it will
-        be started automatically.
-
-        This allows unlimited recording duration (no memory limits) while
-        optionally also streaming chunks for live consumption.
+        Stop video streaming and optionally save recording.
 
         Args:
-            path: Output file path (e.g., "recording.mp4").
-                  Should use .ts extension for MPEG-TS format.
-
-        Note:
-            Recording uses the same MPEG-TS format as streaming.
-            For MP4, use save_buffer_as_video() after stopping.
+            record_to: If provided, transcode the temp recording to this path (MP4).
+                      If None, the temp file is deleted.
         """
-        if self._recording_to_file:
-            logger.warning("File recording already active")
-            return
-
-        # Start streaming if not already active (we tap into its output)
-        if not self._streaming:
-            await self.start_streaming()
-
-        # Open file for writing (we manage the file handle lifecycle manually)
-        try:
-            self._recording_file = open(path, "wb")  # noqa: SIM115
-            self._recording_to_file = True
-            self._recording_path = path
-            logger.info(f"File recording started: {path}")
-        except Exception as e:
-            logger.error(f"Failed to start file recording: {e}")
-            raise
-
-    async def stop_streaming(self) -> None:
-        """Stop streaming to memory buffer."""
         if not self._streaming:
             return
 
-        # Set shutting_down first to prevent any new writes
         self._shutting_down = True
         self._streaming = False
+
         await self._stop_ffmpeg()
-        self._shutting_down = False  # Reset for potential restart
+
+        # Handle recording file
+        temp_path = self._temp_file_path
+        if temp_path and os.path.exists(temp_path):
+            if record_to:
+                logger.info(f"Transcoding recording to: {record_to}")
+                success = self.transcode(temp_path, record_to)
+                if success:
+                    logger.info(f"Recording saved to: {record_to}")
+                else:
+                    logger.error(f"Failed to transcode recording to: {record_to}")
+
+            # Clean up temp file
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Deleted temp file: {temp_path}")
+            except Exception as e:
+                logger.debug(f"Error deleting temp file: {e}")
+
+        self._temp_file_path = None
+        self._shutting_down = False
+        self._recording_start_time = None
         logger.info("Streaming stopped")
 
-    async def stop_file_recording(self) -> None:
-        """Stop file recording.
-
-        This closes the recording file but does NOT stop streaming.
-        Streaming continues independently until stop_streaming() is called.
-        """
-        if not self._recording_to_file:
-            return
-
-        path = self._recording_path
-        self._recording_to_file = False
-        self._recording_path = None
-
-        # Close the recording file
-        if self._recording_file:
-            try:
-                self._recording_file.close()
-            except Exception as e:
-                logger.debug(f"Error closing recording file: {e}")
-            self._recording_file = None
-
-        logger.info(f"File recording stopped: {path}")
-
     async def _stop_ffmpeg(self) -> None:
-        """Internal: stop the ffmpeg process and close any open recording file."""
-        self._recording_start_time = None
-
-        # Close recording file if open
-        if self._recording_file:
+        """Internal: stop the ffmpeg process."""
+        # Close temp file
+        if self._temp_file:
             try:
-                self._recording_file.close()
+                self._temp_file.close()
             except Exception as e:
-                logger.debug(f"Error closing recording file: {e}")
-            self._recording_file = None
-            self._recording_to_file = False
-            self._recording_path = None
+                logger.debug(f"Error closing temp file: {e}")
+            self._temp_file = None
 
         if self._ffmpeg_process:
-            # Close stdin to signal EOF
             if self._ffmpeg_process.stdin:
                 try:
                     self._ffmpeg_process.stdin.close()
                 except Exception as e:
-                    logger.debug(f"Error closing ffmpeg stdin (expected during shutdown): {e}")
+                    logger.debug(f"Error closing ffmpeg stdin: {e}")
 
-            # Wait for process to finish
             try:
                 self._ffmpeg_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -769,26 +783,23 @@ class Display:
         """
         Add a frame from a PIL Image.
 
-        This converts the image to raw RGB bytes and stores it,
-        then sends to ffmpeg for encoding. The pointer is composited
-        onto the frame before encoding.
+        This converts the image to raw RGB bytes and sends to ffmpeg
+        for encoding. The pointer is composited onto the frame.
 
         Args:
             image: PIL Image to add (will be converted to RGB if needed).
         """
-        # Update consumer buffer with pointer composited
-        if self._consumer_buffer_dirty or self._consumer_buffer is None:
-            self._update_consumer_buffer()
+        # Update final display image with pointer composited
+        if self._final_display_image_dirty or self._final_display_image is None:
+            self._update_final_display_image()
 
-        # Use consumer buffer (with pointer) if available, otherwise original image
-        frame_image = self._consumer_buffer if self._consumer_buffer is not None else image
+        # Use final display image (with pointer) if available
+        frame_image = self._final_display_image if self._final_display_image is not None else image
 
-        # Convert to RGB if needed and get raw bytes
         if frame_image.mode != "RGB":
             frame_image = frame_image.convert("RGB")
 
         raw_data = frame_image.tobytes()
-
         await self.add_raw_frame(raw_data)
 
     async def add_raw_frame(self, data: bytes) -> None:
@@ -798,35 +809,29 @@ class Display:
         Args:
             data: Raw RGB24 bytes (width * height * 3 bytes).
         """
-        timestamp = time.time()  # Wall-clock time for accurate seeking
+        timestamp = time.time()
 
-        # Track first frame time for effective FPS calculation
         if self._first_frame_time is None:
             self._first_frame_time = timestamp
 
-        frame = ScreenBuffer(
-            width=self._width,
-            height=self._height,
-            data=data,
-            format="RGB",
-            timestamp=timestamp,
-        )
+        self._stats["frames_received"] += 1
 
-        async with self._frame_lock:
-            self._raw_frames.append(frame)
-            self._frame_count += 1
-            self._stats["frames_received"] += 1
-
-        # Send to ffmpeg if encoding (skip if shutting down or not streaming)
+        # Send to ffmpeg if encoding
         if self._streaming and not self._shutting_down and self._ffmpeg_process and self._ffmpeg_process.stdin:
             try:
-                encode_start = time.perf_counter()
-                # Use run_in_executor to avoid blocking the event loop
+                write_start = time.perf_counter()
+                self._last_stdin_write_time = write_start
+
                 loop = asyncio.get_event_loop()
                 stdin = self._ffmpeg_process.stdin
                 await loop.run_in_executor(None, lambda: (stdin.write(data), stdin.flush()))
-                encode_time = time.perf_counter() - encode_start
-                self._encode_time_total += encode_time
+
+                write_time = time.perf_counter() - write_start
+                self._frame_write_times.append(write_time)
+                if len(self._frame_write_times) > self._max_latency_samples:
+                    self._frame_write_times.pop(0)
+
+                self._encode_time_total += write_time
                 self._frames_since_diag += 1
                 self._stats["frames_encoded"] += 1
 
@@ -837,7 +842,6 @@ class Display:
                     self._last_diag_time = now
 
             except (BrokenPipeError, OSError):
-                # Expected during shutdown - silently ignore
                 pass
 
     def _log_diagnostics(self) -> None:
@@ -848,42 +852,36 @@ class Display:
         avg_encode_ms = (self._encode_time_total / self._frames_since_diag) * 1000
         target_frame_time_ms = 1000 / self._fps
 
-        # Calculate if we're ahead or behind
         headroom_ms = target_frame_time_ms - avg_encode_ms
-        status = "✅ AHEAD" if headroom_ms > 0 else "⚠️ BEHIND"
+        status = "OK" if headroom_ms > 0 else "BEHIND"
 
         queue_size = self._video_queue.qsize()
-        queue_status = "ok" if queue_size < 50 else "⚠️ HIGH" if queue_size < 90 else "🔴 FULL"
+        queue_pct = (queue_size / self._queue_size) * 100
 
         logger.info(
-            f"📊 Backend: {status} by {abs(headroom_ms):.1f}ms | "
+            f"Pipeline: {status} by {abs(headroom_ms):.1f}ms | "
             f"encode={avg_encode_ms:.1f}ms/frame | "
-            f"target={target_frame_time_ms:.1f}ms | "
-            f"queue={queue_size}/100 ({queue_status}) | "
+            f"queue={queue_size}/{self._queue_size} ({queue_pct:.0f}%) | "
             f"drops={self._stats['queue_drops']} | "
             f"fps_in={self._frames_since_diag / self._diag_interval:.1f}"
         )
 
-        # Reset counters
         self._frames_since_diag = 0
         self._encode_time_total = 0.0
 
     async def _read_video_output(self) -> None:
-        """Read encoded video from ffmpeg stdout, buffer it, and write to file if recording."""
+        """Read encoded video from ffmpeg stdout and distribute to queue and file."""
         CHUNK_SIZE = 65536  # 64KB chunks
         loop = asyncio.get_event_loop()
 
         def _read_chunk() -> bytes:
-            """Helper to read a chunk from ffmpeg stdout."""
             if self._ffmpeg_process and self._ffmpeg_process.stdout:
                 return self._ffmpeg_process.stdout.read(CHUNK_SIZE)
             return b""
 
         while self._streaming and self._ffmpeg_process:
             try:
-                # Use run_in_executor to read without blocking the event loop
                 if self._ffmpeg_process and self._ffmpeg_process.stdout:
-                    # Non-blocking read using executor
                     data = await loop.run_in_executor(None, _read_chunk)
                 else:
                     data = b""
@@ -892,13 +890,20 @@ class Display:
                     await asyncio.sleep(0.01)
                     continue
 
-                # Write to file if recording is active
-                if self._recording_to_file and self._recording_file:
+                # Track ffmpeg latency (time from last stdin write to stdout read)
+                if self._last_stdin_write_time > 0:
+                    ffmpeg_latency = time.perf_counter() - self._last_stdin_write_time
+                    self._ffmpeg_latency_samples.append(ffmpeg_latency)
+                    if len(self._ffmpeg_latency_samples) > self._max_latency_samples:
+                        self._ffmpeg_latency_samples.pop(0)
+
+                # Write to temp file
+                if self._temp_file:
                     try:
-                        self._recording_file.write(data)
-                        self._recording_file.flush()
+                        self._temp_file.write(data)
+                        self._temp_file.flush()
                     except Exception as e:
-                        logger.debug(f"Error writing to recording file: {e}")
+                        logger.debug(f"Error writing to temp file: {e}")
 
                 # Create chunk
                 chunk = VideoChunk(
@@ -907,24 +912,14 @@ class Display:
                     sequence=self._chunk_sequence,
                 )
                 self._chunk_sequence += 1
+                self._stats["chunks_produced"] += 1
 
-                # Add to buffer
-                self._video_chunks.append(chunk)
-                self._video_buffer_size += chunk.size_bytes
-                self._stats["bytes_encoded"] += chunk.size_bytes
-
-                # Put in queue for consumers (drop if full - intentional back-pressure)
+                # Put in queue (drop if full - back-pressure)
                 try:
                     self._video_queue.put_nowait(chunk)
                 except asyncio.QueueFull:
                     self._stats["queue_drops"] += 1
                     logger.debug("Video queue full, dropping chunk (back-pressure)")
-
-                # Evict old chunks if over limit
-                while self._video_buffer_size > self._max_video_buffer_bytes and self._video_chunks:
-                    old_chunk = self._video_chunks.popleft()
-                    self._video_buffer_size -= old_chunk.size_bytes
-                    self._stats["chunks_evicted"] += 1
 
             except asyncio.CancelledError:
                 break
@@ -932,181 +927,92 @@ class Display:
                 logger.debug(f"Error reading video output: {e}")
                 await asyncio.sleep(0.01)
 
-    def get_latest_frame(self) -> ScreenBuffer | None:
-        """Get the most recent raw frame."""
-        if self._raw_frames:
-            return self._raw_frames[-1]
-        return None
-
-    def get_frames(self, count: int | None = None) -> list[ScreenBuffer]:
-        """
-        Get recent raw frames.
-
-        Args:
-            count: Number of frames to get. None for all.
-
-        Returns:
-            List of ScreenBuffer frames (oldest first).
-            Each frame has a wall-clock timestamp for true timing.
-        """
-        if count is None:
-            return list(self._raw_frames)
-        return list(self._raw_frames)[-count:]
-
-    def get_video_chunks(self) -> list[VideoChunk]:
-        """Get all buffered video chunks."""
-        return list(self._video_chunks)
-
     async def get_next_video_chunk(self, timeout: float = 1.0) -> VideoChunk | None:
         """
         Wait for and return the next video chunk.
+
+        This is the primary method for real-time video streaming consumers.
+        Chunks are fragmented MP4 data that can be fed to a media source.
 
         Args:
             timeout: Maximum time to wait in seconds.
 
         Returns:
-            VideoChunk or None if timeout.
+            VideoChunk containing encoded video data, or None if timeout.
+
+        Example:
+            >>> while True:
+            ...     chunk = await display.get_next_video_chunk()
+            ...     if chunk:
+            ...         websocket.send(chunk.data)
         """
         try:
             return await asyncio.wait_for(self._video_queue.get(), timeout=timeout)
         except TimeoutError:
             return None
 
-    def clear_raw_frames(self) -> None:
-        """Clear all raw frames from buffer."""
-        self._raw_frames.clear()
-
-    def clear_video_chunks(self) -> None:
-        """Clear all video chunks from buffer."""
-        self._video_chunks.clear()
-        self._video_buffer_size = 0
-
-    async def save_video(self, path: str) -> bool:
+    @staticmethod
+    def transcode(input_path: str, output_path: str) -> bool:
         """
-        Save all buffered video chunks to a file.
+        Transcode a video file to another format.
+
+        Uses ffmpeg with stream copy (no re-encoding) for fast conversion.
+        Typically used to convert MPEG-TS temp files to MP4.
 
         Args:
-            path: Output file path.
+            input_path: Path to input video file.
+            output_path: Path to output video file.
 
         Returns:
-            True if successful.
+            True if successful, False otherwise.
         """
         try:
-            with open(path, "wb") as f:
-                for chunk in self._video_chunks:
-                    f.write(chunk.data)
-            logger.info(f"Saved {self.video_buffer_size_mb:.2f} MB video to {path}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving video: {e}")
-            return False
-
-    async def save_buffer_as_video(self, path: str, use_true_timing: bool = True) -> bool:
-        """
-        Encode the raw frame buffer to a video file.
-
-        This saves the current in-memory raw frame buffer (rolling window) to
-        a video file. Frames older than max_raw_frames have been discarded.
-
-        When use_true_timing=True (default), the video duration will match
-        the actual elapsed wall-clock time between frames. This means if
-        frames were dropped, the video still has correct real-world timing.
-
-        For full session recording without buffer limits, use start_file_recording().
-
-        Args:
-            path: Output file path.
-            use_true_timing: If True, video duration matches real elapsed time.
-                             If False, uses fixed fps (may not match real time).
-
-        Returns:
-            True if successful.
-        """
-        if not self._raw_frames:
-            logger.warning("No frames to save")
-            return False
-
-        frames = list(self._raw_frames)
-
-        # Calculate actual elapsed time and effective FPS for true timing
-        if len(frames) >= 2:
-            elapsed_time = frames[-1].timestamp - frames[0].timestamp
-            actual_fps = len(frames) / elapsed_time if elapsed_time > 0 else self._fps
-        else:
-            elapsed_time = 0
-            actual_fps = self._fps
-
-        # Use actual fps for true timing, or configured fps
-        output_fps = actual_fps if use_true_timing else self._fps
-
-        logger.info(
-            f"Saving {len(frames)} frames, elapsed: {elapsed_time:.2f}s, "
-            f"fps: {output_fps:.1f} (true_timing={use_true_timing})"
-        )
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-s",
-            f"{self._width}x{self._height}",
-            "-r",
-            str(output_fps),
-            "-i",
-            "pipe:0",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-pix_fmt",
-            "yuv420p",
-            "-crf",
-            "23",
-            path,
-        ]
-
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-
-            if process.stdin:
-                for frame in frames:
-                    process.stdin.write(frame.data)
-                process.stdin.close()
-
-            process.wait()
-
-            logger.info(
-                f"Saved video to {path} (duration: {elapsed_time:.2f}s, {len(frames)} frames at {output_fps:.1f} fps)"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    input_path,
+                    "-c",
+                    "copy",
+                    output_path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return True
-        except Exception as e:
-            logger.error(f"Error saving video: {e}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Transcode failed: {e.stderr}")
+            return False
+        except FileNotFoundError:
+            logger.error("ffmpeg not found. Please install ffmpeg.")
             return False
 
     def print_stats(self) -> None:
-        """Print current statistics."""
+        """Print current statistics to stdout."""
+        stats = self.get_pipeline_stats()
         print(f"\n{'=' * 50}")
         print("           DISPLAY STATS")
         print(f"{'=' * 50}")
-        print(f"🖥️  Screen buffer:         {'Initialized' if self._screen_buffer else 'Not initialized'}")
-        raw_info = f"{self.raw_frame_count} / {self.max_raw_frames}"
-        raw_secs = f"({self.raw_buffer_seconds:.1f}s / {self.max_raw_buffer_seconds:.1f}s)"
-        print(f"📷 Raw frames in buffer:  {raw_info} {raw_secs}")
-        print(f"   Total frames received: {self._stats['frames_received']}")
-        print(f"   Bitmaps applied:       {self._stats['bitmaps_applied']}")
-        print(f"⏱️  Recording duration:    {self.recording_duration_seconds:.1f}s")
-        print(f"   Effective FPS:         {self.effective_fps:.1f}")
-        print(f"   Buffer delay:          {self.buffer_delay_seconds:.2f}s")
-        print(f"🎬 Frames encoded:        {self._stats['frames_encoded']}")
-        print(f"💾 Video buffer:          {self.video_buffer_size_mb:.2f} MB")
-        print(f"   Bytes encoded:         {self._stats['bytes_encoded'] / 1024 / 1024:.2f} MB")
-        print(f"   Chunks evicted:        {self._stats['chunks_evicted']}")
-        print(f"❌ Encoding errors:       {self._stats['encoding_errors']}")
+        print(f"Screen buffer:       {'Initialized' if self._raw_display_image else 'Not initialized'}")
+        print(f"Streaming:           {'Active' if self.is_streaming else 'Inactive'}")
+        print(f"Recording duration:  {self.recording_duration_seconds:.1f}s")
+        print(f"Effective FPS:       {self.effective_fps:.1f}")
+        print(f"{'=' * 50}")
+        print("           PIPELINE STATS")
+        print(f"{'=' * 50}")
+        print(f"Bitmap apply:        {stats.bitmap_to_buffer_ms:.2f}ms avg")
+        print(f"Frame write:         {stats.frame_to_ffmpeg_ms:.2f}ms avg")
+        print(f"FFmpeg latency:      {stats.ffmpeg_latency_ms:.2f}ms avg")
+        print(f"E2E estimate:        {stats.total_e2e_estimate_ms:.2f}ms")
+        print(f"{'=' * 50}")
+        print("           COUNTERS")
+        print(f"{'=' * 50}")
+        print(f"Bitmaps applied:     {stats.bitmaps_applied}")
+        print(f"Frames received:     {stats.frames_received}")
+        print(f"Frames encoded:      {stats.frames_encoded}")
+        print(f"Chunks produced:     {stats.chunks_produced}")
+        print(f"Consumer lag:        {stats.consumer_lag_chunks} chunks")
+        print(f"Queue drops:         {stats.queue_drops}")
         print(f"{'=' * 50}\n")

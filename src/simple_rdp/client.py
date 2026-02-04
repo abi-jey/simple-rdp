@@ -80,6 +80,16 @@ class RDPClient:
     This client establishes an RDP connection and provides access to
     screen capture and input transmission for automation workflows.
     It does not provide an interactive session itself.
+
+    Video Recording:
+        When connected, video is always encoded to a temp file in the background.
+        Use `get_next_video_chunk()` for real-time streaming to consumers.
+        On disconnect, if `record_to` was provided, the temp file is transcoded to MP4.
+
+    Consumer Lag:
+        The video queue holds ~20 seconds of encoded chunks.
+        Use `is_consumer_behind()` or `consumer_lag_chunks` to monitor lag.
+        If the consumer falls too far behind, chunks are dropped (back-pressure).
     """
 
     def __init__(
@@ -94,6 +104,7 @@ class RDPClient:
         color_depth: int = 32,
         show_wallpaper: bool = False,
         capture_fps: int = 30,
+        record_to: str | None = None,
     ) -> None:
         """
         Initialize the RDP client.
@@ -109,6 +120,9 @@ class RDPClient:
             color_depth: Color depth in bits per pixel.
             show_wallpaper: Whether to show desktop wallpaper (default: False for performance).
             capture_fps: Frame capture rate for the display buffer (default: 30).
+            record_to: If provided, save the session recording to this path (MP4) on disconnect.
+                      The recording is always captured to a temp file; this controls whether
+                      it's transcoded and saved when the session ends.
         """
         self._host = host
         self._port = port
@@ -119,6 +133,7 @@ class RDPClient:
         self._height = height
         self._color_depth = color_depth
         self._show_wallpaper = show_wallpaper
+        self._record_to = record_to
         self._connected = False
         self._tcp_reader: StreamReader | None = None
         self._tcp_writer: StreamWriter | None = None
@@ -246,9 +261,34 @@ class RDPClient:
         return self._display.is_streaming
 
     @property
-    def is_file_recording(self) -> bool:
-        """Return whether file recording is currently active."""
-        return self._display.is_file_recording
+    def record_to(self) -> str | None:
+        """Return the path where the session recording will be saved on disconnect."""
+        return self._record_to
+
+    @property
+    def consumer_lag_chunks(self) -> int:
+        """
+        Return the number of video chunks waiting in the queue.
+
+        This indicates how far behind a consumer calling get_next_video_chunk() is:
+        - 0-10: Consumer is keeping up well
+        - 10-50: Consumer is slightly behind
+        - 50+: Consumer is significantly behind
+        - 600 (queue full): Chunks are being dropped
+        """
+        return self._display.consumer_lag_chunks
+
+    def is_consumer_behind(self, threshold: int = 10) -> bool:
+        """
+        Check if the video consumer is falling behind.
+
+        Args:
+            threshold: Number of queued chunks considered "behind". Default is 10.
+
+        Returns:
+            True if consumer_lag_chunks > threshold.
+        """
+        return self._display.is_consumer_behind(threshold)
 
     async def connect(self) -> None:
         """
@@ -296,6 +336,9 @@ class RDPClient:
         # Initialize Display screen buffer
         self._display.initialize_screen()
 
+        # Start video streaming (always on - records to temp file)
+        await self._display.start_streaming()
+
         # Start receive loop and capture loop
         self._running = True
         self._receive_task = asyncio.create_task(self._receive_loop())
@@ -308,12 +351,17 @@ class RDPClient:
         logger.info("RDP connection established successfully")
 
     async def disconnect(self) -> None:
-        """Disconnect from the RDP server."""
+        """
+        Disconnect from the RDP server.
+
+        If record_to was provided in __init__, the session recording is
+        transcoded to MP4 and saved to that path.
+        """
         self._running = False
 
-        # Stop streaming/recording if active
+        # Stop streaming and optionally save recording
         if self._display.is_streaming:
-            await self._display.stop_streaming()
+            await self._display.stop_streaming(record_to=self._record_to)
 
         # Stop capture task
         if self._capture_task:
@@ -372,71 +420,50 @@ class RDPClient:
         """
         await self._display.save_screenshot(path)
 
-    # ==================== Video Streaming & Recording ====================
+    # ==================== Video Streaming ====================
 
-    async def start_streaming(self) -> None:
+    async def get_next_video_chunk(self, timeout: float = 1.0) -> Any:
         """
-        Start video streaming to memory buffer.
+        Wait for and return the next video chunk.
 
-        Frames are encoded to MPEG-TS chunks that can be consumed via
-        `display.get_next_video_chunk()` for real-time streaming.
+        This is the primary method for real-time video streaming consumers.
+        Chunks are fragmented MP4 data that can be fed to a media source.
 
-        Use `stop_streaming()` to stop encoding.
-        """
-        await self._display.start_streaming()
-
-    async def stop_streaming(self) -> None:
-        """
-        Stop video streaming.
-
-        Also stops any active file recording.
-        """
-        await self._display.stop_streaming()
-
-    async def start_file_recording(self, path: str) -> None:
-        """
-        Start recording video to a file.
-
-        Recording taps into the streaming output - if streaming is not
-        active, it will be started automatically.
+        Video streaming is automatically started on connect() and stopped on disconnect().
 
         Args:
-            path: Output file path (should use .ts extension for MPEG-TS).
-        """
-        await self._display.start_file_recording(path)
-
-    async def stop_file_recording(self) -> None:
-        """
-        Stop file recording.
-
-        Streaming continues independently until stop_streaming() is called.
-        """
-        await self._display.stop_file_recording()
-
-    async def save_video(self, path: str) -> bool:
-        """
-        Save the current video buffer to a file.
-
-        This encodes the raw frame buffer (~10 seconds) to a video file.
-        For full session recording, use start_file_recording() instead.
-
-        Args:
-            path: Output file path (e.g., "recording.mp4").
+            timeout: Maximum time to wait in seconds.
 
         Returns:
-            True if successful, False otherwise.
-        """
-        return await self._display.save_buffer_as_video(path)
+            VideoChunk containing encoded video data, or None if timeout.
 
-    def get_recording_stats(self) -> dict[str, Any]:
+        Example:
+            >>> async with RDPClient(host, user, password) as client:
+            ...     while True:
+            ...         chunk = await client.get_next_video_chunk()
+            ...         if chunk:
+            ...             websocket.send(chunk.data)
         """
-        Get video recording statistics.
+        return await self._display.get_next_video_chunk(timeout)
+
+    def get_pipeline_stats(self) -> Any:
+        """
+        Get detailed pipeline statistics including latency measurements.
 
         Returns:
-            Dictionary with recording stats including frames received,
-            frames encoded, buffer sizes, and errors.
+            PipelineStats dataclass with timing and counter information including:
+            - bitmap_to_buffer_ms: Average time to apply bitmap updates
+            - frame_to_ffmpeg_ms: Average time to write frames to encoder
+            - ffmpeg_latency_ms: Estimated encoder latency
+            - total_e2e_estimate_ms: Estimated total end-to-end latency
+            - consumer_lag_chunks: Number of chunks waiting in queue
+
+        Example:
+            >>> stats = client.get_pipeline_stats()
+            >>> print(f"E2E latency: {stats.total_e2e_estimate_ms:.1f}ms")
+            >>> print(f"Consumer lag: {stats.consumer_lag_chunks} chunks")
         """
-        return self._display.stats
+        return self._display.get_pipeline_stats()
 
     @staticmethod
     def transcode(input_path: str, output_path: str) -> bool:
@@ -1113,8 +1140,8 @@ class RDPClient:
                 start = asyncio.get_event_loop().time()
 
                 # Capture current screen buffer to raw frames
-                if self._display._screen_buffer is not None:
-                    await self._display.add_frame(self._display._screen_buffer)
+                if self._display._raw_display_image is not None:
+                    await self._display.add_frame(self._display._raw_display_image)
 
                 # Sleep for remainder of interval
                 elapsed = asyncio.get_event_loop().time() - start

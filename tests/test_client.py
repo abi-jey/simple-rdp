@@ -1,6 +1,5 @@
 """Tests for RDP Client."""
 
-import tempfile
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -183,10 +182,10 @@ class TestClientInternalState:
         client = RDPClient(host="localhost")
         assert client._share_id == 0
 
-    def test_initial_screen_buffer_none(self):
-        """Test initial display screen_buffer is None."""
+    def test_initial_raw_display_image_none(self):
+        """Test initial display _raw_display_image is None."""
         client = RDPClient(host="localhost")
-        assert client._display._screen_buffer is None
+        assert client._display._raw_display_image is None
 
     def test_initial_fragment_buffer_empty(self):
         """Test initial fragment buffer is empty."""
@@ -212,7 +211,7 @@ class TestClientScreenCapture:
     async def test_screenshot_returns_blank_when_not_connected(self):
         """Test screenshot returns blank image when not connected."""
         client = RDPClient(host="localhost", width=100, height=100)
-        # Display screen_buffer is None, should return blank image
+        # Display _raw_display_image is None, should return blank image
         img = await client.screenshot()
         assert img.size == (100, 100)
         # Should be all black
@@ -226,14 +225,15 @@ class TestClientScreenCapture:
         client = RDPClient(host="localhost", width=100, height=100)
         # Initialize and set screen buffer via display
         client._display.initialize_screen()
-        client._display._screen_buffer = Image.new("RGB", (100, 100), color=(255, 0, 0))
+        client._display._raw_display_image = Image.new("RGB", (100, 100), color=(255, 0, 0))
+        client._display._final_display_image_dirty = True
 
         img = await client.screenshot()
         assert img.size == (100, 100)
         # Should be red
         assert img.getpixel((50, 50)) == (255, 0, 0)
         # Should be a copy, not the original
-        assert img is not client._display._screen_buffer
+        assert img is not client._display._raw_display_image
 
 
 class TestClientColorDepth:
@@ -350,47 +350,36 @@ class TestClientDisplay:
         client = RDPClient(host="localhost")
         assert client.is_streaming is False
 
-    @pytest.mark.asyncio
-    @patch("subprocess.Popen")
-    async def test_start_streaming(self, mock_popen):
-        """Test start_streaming sets streaming flag."""
-        mock_popen.return_value = MagicMock()
+    def test_consumer_lag_chunks_starts_at_zero(self):
+        """Test consumer_lag_chunks starts at 0."""
         client = RDPClient(host="localhost")
-        await client.start_streaming()
-        assert client.is_streaming is True
-        await client.stop_streaming()
+        assert client.consumer_lag_chunks == 0
 
-    @pytest.mark.asyncio
-    @patch("subprocess.Popen")
-    async def test_stop_streaming(self, mock_popen):
-        """Test stop_streaming clears streaming flag."""
-        mock_popen.return_value = MagicMock()
+    def test_is_consumer_behind_false_initially(self):
+        """Test is_consumer_behind returns False initially."""
         client = RDPClient(host="localhost")
-        await client.start_streaming()
-        await client.stop_streaming()
-        assert client.is_streaming is False
+        assert client.is_consumer_behind() is False
+        assert client.is_consumer_behind(threshold=0) is False
 
-    @pytest.mark.asyncio
-    @patch("subprocess.Popen")
-    async def test_start_file_recording(self, mock_popen):
-        """Test start_file_recording starts both streaming and file recording."""
-        mock_popen.return_value = MagicMock()
-        client = RDPClient(host="localhost")
-        # Use tempfile for cross-platform temp path
-        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
-            temp_path = f.name
-        await client.start_file_recording(temp_path)
-        assert client.is_streaming is True
-        assert client.is_file_recording is True
-        await client.stop_streaming()
+    def test_get_pipeline_stats(self):
+        """Test get_pipeline_stats returns PipelineStats."""
+        from simple_rdp.display import PipelineStats
 
-    def test_get_recording_stats(self):
-        """Test get_recording_stats returns stats dict."""
         client = RDPClient(host="localhost")
-        stats = client.get_recording_stats()
-        assert "frames_received" in stats
-        assert "frames_encoded" in stats
-        assert "encoding_errors" in stats
+        stats = client.get_pipeline_stats()
+        assert isinstance(stats, PipelineStats)
+        assert stats.frames_received == 0
+        assert stats.frames_encoded == 0
+        assert stats.chunks_produced == 0
+        assert stats.consumer_lag_chunks == 0
+
+    def test_record_to_property(self):
+        """Test record_to property."""
+        client = RDPClient(host="localhost", record_to="/tmp/test.mp4")
+        assert client.record_to == "/tmp/test.mp4"
+
+        client2 = RDPClient(host="localhost")
+        assert client2.record_to is None
 
     @patch("subprocess.run")
     def test_transcode_success(self, mock_run):
@@ -422,14 +411,3 @@ class TestClientDisplay:
         mock_run.side_effect = FileNotFoundError()
         result = RDPClient.transcode("input.ts", "output.mp4")
         assert result is False
-
-    @pytest.mark.asyncio
-    @patch("subprocess.Popen")
-    async def test_disconnect_stops_streaming(self, mock_popen):
-        """Test disconnect stops streaming if active."""
-        mock_popen.return_value = MagicMock()
-        client = RDPClient(host="localhost")
-        await client.start_streaming()
-        assert client.is_streaming is True
-        await client.disconnect()
-        assert client.is_streaming is False
