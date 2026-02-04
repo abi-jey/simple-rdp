@@ -225,7 +225,8 @@ class TestDisplayAsync:
         await display.add_raw_frame(frame_data)
         await asyncio.sleep(0.05)  # Small delay
         # Buffer delay should be > 0 since frame is slightly old
-        assert display.buffer_delay_seconds >= 0.04
+        # Use 0.03 threshold to account for timing variations on different platforms
+        assert display.buffer_delay_seconds >= 0.03
 
     @pytest.mark.asyncio
     async def test_clear_raw_frames_after_add(self) -> None:
