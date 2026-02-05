@@ -21,7 +21,6 @@ load_dotenv()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from simple_rdp import RDPClient  # noqa: E402
-from simple_rdp.display import Display  # noqa: E402
 
 
 @dataclass
