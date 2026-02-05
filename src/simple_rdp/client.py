@@ -146,8 +146,6 @@ class RDPClient:
         self._share_id: int = 0
 
         # Pointer/cursor state
-        self._pointer_x: int = 0
-        self._pointer_y: int = 0
         self._pointer_visible: bool = True
         self._pointer_image: Image.Image | None = None
         self._pointer_hotspot: tuple[int, int] = (0, 0)
@@ -221,7 +219,7 @@ class RDPClient:
     @property
     def pointer_position(self) -> tuple[int, int]:
         """Return the current pointer position (x, y)."""
-        return (self._pointer_x, self._pointer_y)
+        return self._display.pointer_position
 
     @property
     def pointer_visible(self) -> bool:
@@ -667,6 +665,9 @@ class RDPClient:
         event_data = build_mouse_event(x, y, button=0, is_move=False, wheel_delta=delta)
         await self._send_input_events([(event_time, INPUT_EVENT_MOUSE, event_data)])
 
+        # Update local pointer position for compositing
+        self._display.update_pointer(x=x, y=y)
+
     def _normalize_button(self, button: int | str) -> int:
         """Convert button name to number."""
         if isinstance(button, str):
@@ -702,6 +703,9 @@ class RDPClient:
         )
 
         await self._send_input_events(events)
+
+        # Update local pointer position for compositing (final position)
+        self._display.update_pointer(x=x2, y=y2)
 
     # ==================== Connection Sequence Methods ====================
 
@@ -1309,12 +1313,12 @@ class RDPClient:
         if len(data) < 4:
             return
         # TS_POINTERPOSATTRIBUTE: position (4 bytes) = xPos (2) + yPos (2)
-        self._pointer_x = struct.unpack("<H", data[0:2])[0]
-        self._pointer_y = struct.unpack("<H", data[2:4])[0]
+        x = struct.unpack("<H", data[0:2])[0]
+        y = struct.unpack("<H", data[2:4])[0]
         self._pointer_visible = True
         # Update display with rate limiting
-        self._display.update_pointer(x=self._pointer_x, y=self._pointer_y, visible=True)
-        logger.debug(f"Pointer position: ({self._pointer_x}, {self._pointer_y})")
+        self._display.update_pointer(x=x, y=y, visible=True)
+        logger.debug(f"Pointer position: ({x}, {y})")
 
     async def _process_cached_pointer(self, data: bytes) -> None:
         """Process a Cached Pointer Update."""

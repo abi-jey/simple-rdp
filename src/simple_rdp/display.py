@@ -363,6 +363,11 @@ class Display:
         return self._video_queue.qsize() > threshold
 
     @property
+    def pointer_position(self) -> tuple[int, int]:
+        """Return the current pointer position (x, y)."""
+        return (self._pointer_x, self._pointer_y)
+
+    @property
     def stats(self) -> dict[str, int]:
         """Return current statistics counters."""
         return self._stats.copy()
