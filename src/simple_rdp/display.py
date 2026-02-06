@@ -528,6 +528,42 @@ class Display:
         img.save(path)
         logger.info(f"Screenshot saved to {path}")
 
+    async def screenshot_with_crop(self, top_left: tuple[int, int], bottom_right: tuple[int, int]) -> Image.Image:
+        """
+        Capture a cropped area of the screen.
+
+        Args:
+            top_left: (x, y) coordinates of the top-left corner of the crop area.
+            bottom_right: (x, y) coordinates of the bottom-right corner of the crop area.
+
+        Returns:
+            Cropped PIL Image of the specified region with pointer composited.
+        """
+        async with self._screen_lock:
+            if self._raw_display_image is None:
+                crop_w = bottom_right[0] - top_left[0]
+                crop_h = bottom_right[1] - top_left[1]
+                return Image.new("RGB", (max(1, crop_w), max(1, crop_h)), (0, 0, 0))
+
+            # Update final display image if dirty
+            if self._final_display_image_dirty or self._final_display_image is None:
+                self._update_final_display_image()
+
+            assert self._final_display_image is not None
+
+            # Clamp coordinates to display bounds
+            x1 = max(0, min(top_left[0], self._width))
+            y1 = max(0, min(top_left[1], self._height))
+            x2 = max(0, min(bottom_right[0], self._width))
+            y2 = max(0, min(bottom_right[1], self._height))
+
+            # Ensure valid crop dimensions
+            if x2 <= x1 or y2 <= y1:
+                return Image.new("RGB", (1, 1), (0, 0, 0))
+
+            cropped = self._final_display_image.crop((x1, y1, x2, y2))
+            return cropped.copy()
+
     async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
         """
         Capture a cropped area around the pointer position.

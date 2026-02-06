@@ -425,6 +425,19 @@ class RDPClient:
         """
         return await self._display.pointer_area_screenshot()
 
+    async def screenshot_with_crop(self, top_left: tuple[int, int], bottom_right: tuple[int, int]) -> Image.Image:
+        """
+        Capture a cropped area of the screen.
+
+        Args:
+            top_left: (x, y) coordinates of the top-left corner of the crop area.
+            bottom_right: (x, y) coordinates of the bottom-right corner of the crop area.
+
+        Returns:
+            Cropped PIL Image of the specified region with pointer composited.
+        """
+        return await self._display.screenshot_with_crop(top_left, bottom_right)
+
     async def save_screenshot(self, path: str) -> None:
         """
         Save a screenshot to a file.
