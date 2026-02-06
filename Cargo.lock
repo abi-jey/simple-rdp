@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "simple-rdp"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "pyo3",
 ]

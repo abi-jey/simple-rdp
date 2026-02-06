@@ -1,6 +1,6 @@
 [project]
 name = "simple-rdp"
-version = "0.8.2"
+version = "0.8.3"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 readme = "README.md"
 requires-python = ">=3.11, <4.0"
