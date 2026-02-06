@@ -409,6 +409,21 @@ class RDPClient:
         """
         return await self._display.screenshot()
 
+    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int]]:
+        """
+        Capture a cropped area around the pointer position.
+
+        The crop is 1/3 width x 1/3 height of the display (1/9 of total area),
+        centered on the pointer position when possible. When the pointer is
+        near edges, the crop is clamped to stay within display bounds.
+
+        Returns:
+            Tuple of (cropped_image, (top_x, top_y)) where:
+            - cropped_image: Cropped region with pointer composited
+            - (top_x, top_y): Top-left corner position of crop relative to display
+        """
+        return await self._display.pointer_area_screenshot()
+
     async def save_screenshot(self, path: str) -> None:
         """
         Save a screenshot to a file.

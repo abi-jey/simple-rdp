@@ -528,6 +528,48 @@ class Display:
         img.save(path)
         logger.info(f"Screenshot saved to {path}")
 
+    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int]]:
+        """
+        Capture a cropped area around the pointer position.
+
+        The crop is 1/3 width x 1/3 height of the display (1/9 of total area),
+        centered on the pointer position when possible. When the pointer is
+        near edges, the crop is clamped to stay within display bounds.
+
+        Returns:
+            Tuple of (cropped_image, (top_x, top_y)) where:
+            - cropped_image: Cropped region with pointer composited
+            - (top_x, top_y): Top-left corner position of crop relative to display
+        """
+        async with self._screen_lock:
+            if self._raw_display_image is None:
+                crop_w = self._width // 3
+                crop_h = self._height // 3
+                return (Image.new("RGB", (crop_w, crop_h), (0, 0, 0)), (0, 0))
+
+            # Update final display image if dirty
+            if self._final_display_image_dirty or self._final_display_image is None:
+                self._update_final_display_image()
+
+            assert self._final_display_image is not None
+
+            # Calculate crop dimensions (1/3 of display)
+            crop_w = self._width // 3
+            crop_h = self._height // 3
+
+            # Calculate ideal top-left to center pointer
+            top_x = self._pointer_x - crop_w // 2
+            top_y = self._pointer_y - crop_h // 2
+
+            # Clamp to display bounds
+            top_x = max(0, min(top_x, self._width - crop_w))
+            top_y = max(0, min(top_y, self._height - crop_h))
+
+            # Crop the image
+            cropped = self._final_display_image.crop((top_x, top_y, top_x + crop_w, top_y + crop_h))
+
+            return (cropped.copy(), (top_x, top_y))
+
     async def apply_bitmap(
         self,
         x: int,
