@@ -1,5 +1,4 @@
-"""
-CredSSP (Credential Security Support Provider) implementation for NLA.
+"""CredSSP (Credential Security Support Provider) implementation for NLA.
 
 This module implements the CredSSP protocol as defined in MS-CSSP for
 Network Level Authentication in RDP connections.
@@ -39,12 +38,11 @@ def _encode_asn1_length(length: int) -> bytes:
     """Encode length in ASN.1 DER format."""
     if length < 0x80:
         return bytes([length])
-    elif length < 0x100:
+    if length < 0x100:
         return bytes([0x81, length])
-    elif length < 0x10000:
+    if length < 0x10000:
         return bytes([0x82, (length >> 8) & 0xFF, length & 0xFF])
-    else:
-        return bytes([0x83, (length >> 16) & 0xFF, (length >> 8) & 0xFF, length & 0xFF])
+    return bytes([0x83, (length >> 16) & 0xFF, (length >> 8) & 0xFF, length & 0xFF])
 
 
 def _encode_asn1_integer(value: int) -> bytes:
@@ -97,8 +95,7 @@ def _decode_asn1_element(data: bytes, offset: int) -> tuple[int, bytes, int]:
 
 
 def build_ts_request(nego_token: bytes | None = None, version: int = CREDSSP_VERSION) -> bytes:
-    """
-    Build a TSRequest structure for CredSSP.
+    """Build a TSRequest structure for CredSSP.
 
     TSRequest ::= SEQUENCE {
         version    [0] INTEGER,
@@ -132,8 +129,7 @@ def build_ts_request_with_pub_key_auth(
     client_nonce: bytes | None = None,
     version: int = CREDSSP_VERSION,
 ) -> bytes:
-    """
-    Build a TSRequest with pubKeyAuth for the final authentication step.
+    """Build a TSRequest with pubKeyAuth for the final authentication step.
 
     For CredSSP v5+, this should include:
     - The final negoToken (if any)
@@ -176,8 +172,7 @@ def build_ts_request_with_credentials(auth_info: bytes, version: int = CREDSSP_V
 
 
 def parse_ts_request(data: bytes) -> dict[str, bytes | int | None]:
-    """
-    Parse a TSRequest structure.
+    """Parse a TSRequest structure.
 
     Returns a dict with keys: version, nego_token, auth_info, pub_key_auth, error_code, client_nonce
     """
@@ -235,8 +230,7 @@ def parse_ts_request(data: bytes) -> dict[str, bytes | int | None]:
 
 
 def build_ts_credentials(domain: str, username: str, password: str) -> bytes:
-    """
-    Build TSCredentials structure.
+    """Build TSCredentials structure.
 
     TSCredentials ::= SEQUENCE {
         credType    [0] INTEGER,
@@ -270,8 +264,7 @@ def build_ts_credentials(domain: str, username: str, password: str) -> bytes:
 
 
 class CredSSPAuth:
-    """
-    CredSSP authentication handler.
+    """CredSSP authentication handler.
 
     Manages the SPNEGO authentication and CredSSP message exchange.
     """
@@ -283,14 +276,14 @@ class CredSSPAuth:
         password: str,
         domain: str = "",
     ) -> None:
-        """
-        Initialize CredSSP authentication.
+        """Initialize CredSSP authentication.
 
         Args:
             hostname: The target server hostname.
             username: The username for authentication.
             password: The password for authentication.
             domain: The domain for authentication (optional).
+
         """
         self._hostname = hostname
         self._username = username
@@ -338,8 +331,7 @@ class CredSSPAuth:
         return bytes(token)
 
     def process_challenge(self, server_token: bytes) -> bytes | None:
-        """
-        Process a challenge token from the server.
+        """Process a challenge token from the server.
 
         Returns the response token, or None if authentication is complete.
         Note: For v5+, the final token should be sent WITH pubKeyAuth.
@@ -364,8 +356,7 @@ class CredSSPAuth:
         self._server_public_key = public_key
 
     def compute_client_server_hash(self, public_key: bytes) -> bytes:
-        """
-        Compute the Client-To-Server hash for CredSSP v5+.
+        """Compute the Client-To-Server hash for CredSSP v5+.
 
         Hash = SHA256(ClientServerHashMagic || ClientNonce || SubjectPublicKey)
         """
@@ -373,8 +364,7 @@ class CredSSPAuth:
         return sha256(hash_input).digest()
 
     def compute_server_client_hash(self, public_key: bytes) -> bytes:
-        """
-        Compute the Server-To-Client hash for CredSSP v5+.
+        """Compute the Server-To-Client hash for CredSSP v5+.
 
         Hash = SHA256(ServerClientHashMagic || ClientNonce || SubjectPublicKey)
         """
@@ -382,8 +372,7 @@ class CredSSPAuth:
         return sha256(hash_input).digest()
 
     def wrap_public_key(self, public_key: bytes) -> bytes:
-        """
-        Wrap (encrypt) the public key for pubKeyAuth.
+        """Wrap (encrypt) the public key for pubKeyAuth.
 
         For CredSSP v5+, we hash the public key with the nonce.
         For v2-4, we encrypt the raw public key.
@@ -393,14 +382,12 @@ class CredSSPAuth:
             hash_value = self.compute_client_server_hash(public_key)
             logger.debug(f"CredSSP v{self._server_version}: using hash-based pubKeyAuth")
             return bytes(self._spnego_ctx.wrap(hash_value, encrypt=True).data)
-        else:
-            # v2-4: Encrypt the raw public key
-            logger.debug(f"CredSSP v{self._server_version}: using raw pubKeyAuth")
-            return bytes(self._spnego_ctx.wrap(public_key, encrypt=True).data)
+        # v2-4: Encrypt the raw public key
+        logger.debug(f"CredSSP v{self._server_version}: using raw pubKeyAuth")
+        return bytes(self._spnego_ctx.wrap(public_key, encrypt=True).data)
 
     def verify_server_public_key(self, encrypted_response: bytes, public_key: bytes) -> bool:
-        """
-        Verify the server's public key response.
+        """Verify the server's public key response.
 
         For v5+: Server sends encrypted hash using ServerClientHashMagic.
         For v2-4: Server sends encrypted (public_key[0] + 1) || public_key[1:].
@@ -414,14 +401,13 @@ class CredSSPAuth:
                 return False
             logger.debug("Server public key hash verified successfully")
             return True
-        else:
-            # v2-4: First byte should be incremented by 1
-            expected = bytes([(public_key[0] + 1) & 0xFF]) + public_key[1:]
-            if decrypted != expected:
-                logger.warning("Server public key verification failed (v2-4 mode)")
-                return False
-            logger.debug("Server public key verified successfully (v2-4 mode)")
-            return True
+        # v2-4: First byte should be incremented by 1
+        expected = bytes([(public_key[0] + 1) & 0xFF]) + public_key[1:]
+        if decrypted != expected:
+            logger.warning("Server public key verification failed (v2-4 mode)")
+            return False
+        logger.debug("Server public key verified successfully (v2-4 mode)")
+        return True
 
     def unwrap_public_key(self, wrapped_data: bytes) -> bytes:
         """Unwrap (decrypt) the server's public key response."""

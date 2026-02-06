@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Performance Test for simple-rdp (Mouse-only version)
+"""Performance Test for simple-rdp (Mouse-only version)
 - Measures maximum frame capture rate
 - Tracks memory usage over time
 - 100 seconds of mouse movements to generate screen updates
@@ -136,8 +135,7 @@ async def capture_loop(client: RDPClient, metrics: PerformanceMetrics, stop_even
 
 
 async def mouse_stress_test(client: RDPClient, duration_seconds: int = 100):
-    """
-    Perform intensive mouse movements to generate screen updates.
+    """Perform intensive mouse movements to generate screen updates.
     This is a safe stress test that won't disconnect the session.
     """
     print(f"\n=== Starting {duration_seconds}s of mouse movement stress test ===\n")

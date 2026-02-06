@@ -1,5 +1,4 @@
-"""
-Example usage of Simple RDP client for automation.
+"""Example usage of Simple RDP client for automation.
 
 This example demonstrates:
 - Connecting to a remote Windows machine

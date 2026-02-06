@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Performance Test for simple-rdp
+"""Performance Test for simple-rdp
 - Measures maximum frame capture rate
 - Tracks memory usage over time
 - 100 seconds of intensive UI operations using keyboard shortcuts
@@ -204,8 +203,7 @@ async def capture_loop(client: RDPClient, metrics: PerformanceMetrics, stop_even
 
 
 async def intensive_ui_operations(client: RDPClient, duration_seconds: int = 100):
-    """
-    Perform intensive UI operations using keyboard shortcuts.
+    """Perform intensive UI operations using keyboard shortcuts.
     Designed to stress-test screen updates.
     """
     print(f"\n=== Starting {duration_seconds}s of intensive UI operations ===\n")

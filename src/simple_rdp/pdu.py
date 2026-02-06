@@ -1,5 +1,4 @@
-"""
-RDP PDU layer implementation.
+"""RDP PDU layer implementation.
 
 This module implements RDP-specific PDUs for the connection sequence
 and data exchange phases.
@@ -139,8 +138,7 @@ def build_client_info_pdu(
     flags: int = INFO_MOUSE | INFO_UNICODE | INFO_LOGONNOTIFY | INFO_DISABLECTRLALTDEL,
     performance_flags: int = PERF_DISABLE_WALLPAPER,
 ) -> bytes:
-    """
-    Build Client Info PDU (TS_INFO_PACKET).
+    """Build Client Info PDU (TS_INFO_PACKET).
 
     This is sent after the channel join sequence to provide user credentials
     and session configuration.
@@ -204,8 +202,7 @@ def build_client_info_pdu(
 
 
 def build_security_exchange_pdu(encrypted_client_random: bytes) -> bytes:
-    """
-    Build Security Exchange PDU.
+    """Build Security Exchange PDU.
 
     This is only used with Standard RDP Security (not TLS/NLA).
     """
@@ -325,11 +322,11 @@ def build_font_list_pdu() -> bytes:
 
 
 def build_input_event_pdu(events: list[tuple[int, int, bytes]]) -> bytes:
-    """
-    Build Input Event PDU.
+    """Build Input Event PDU.
 
     Args:
         events: List of (event_time, event_type, event_data) tuples
+
     """
     data = bytearray()
 
@@ -487,7 +484,7 @@ def parse_demand_active_pdu(data: bytes) -> dict[str, Any]:
     offset += 2
 
     # Combined capabilities length (2 bytes)
-    _caps_len = struct.unpack_from("<H", data, offset)[0]  # noqa: F841
+    _caps_len = struct.unpack_from("<H", data, offset)[0]
     offset += 2
 
     # Source descriptor
@@ -575,7 +572,8 @@ def parse_bitmap_update(data: bytes) -> list[dict[str, Any]]:
 
         if offset + bitmap["length"] > len(data):
             logger.debug(
-                f"Stopping at rect {i}: not enough data for bitmap (need {bitmap['length']}, have {len(data) - offset})"
+                f"Stopping at rect {i}: not enough data for bitmap "
+                f"(need {bitmap['length']}, have {len(data) - offset})",
             )
             break
 
@@ -589,8 +587,7 @@ def parse_bitmap_update(data: bytes) -> list[dict[str, Any]]:
 
 
 def build_refresh_rect_pdu(rectangles: list[tuple[int, int, int, int]]) -> bytes:
-    """
-    Build Refresh Rect PDU to request screen redraw.
+    """Build Refresh Rect PDU to request screen redraw.
 
     This PDU is sent by the client to request the server to redraw
     one or more rectangles of the session screen area.
@@ -601,6 +598,7 @@ def build_refresh_rect_pdu(rectangles: list[tuple[int, int, int, int]]) -> bytes
 
     Returns:
         The Refresh Rect PDU data (without Share Data Header).
+
     """
     data = bytearray()
 
@@ -621,8 +619,7 @@ def build_refresh_rect_pdu(rectangles: list[tuple[int, int, int, int]]) -> bytes
 
 
 def build_suppress_output_pdu(allow_display_updates: bool, rectangle: tuple[int, int, int, int] | None = None) -> bytes:
-    """
-    Build Suppress Output PDU to control display updates.
+    """Build Suppress Output PDU to control display updates.
 
     This PDU is sent by the client to toggle the sending of
     desktop display updates from the server.
@@ -636,6 +633,7 @@ def build_suppress_output_pdu(allow_display_updates: bool, rectangle: tuple[int,
 
     Returns:
         The Suppress Output PDU data (without Share Data Header).
+
     """
     data = bytearray()
 

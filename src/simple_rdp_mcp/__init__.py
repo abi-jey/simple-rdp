@@ -1,5 +1,4 @@
-"""
-Simple RDP MCP Server.
+"""Simple RDP MCP Server.
 
 Exposes RDP client capabilities as MCP tools for LLM agents.
 

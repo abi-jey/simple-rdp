@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-FPS Limit Test for simple-rdp (New Architecture)
+"""FPS Limit Test for simple-rdp (New Architecture)
 
 Tests different target FPS rates to find the maximum sustainable rate.
 Monitors memory usage to detect leaks in the new streaming pipeline.
@@ -47,7 +46,6 @@ async def test_streaming_fps(
     duration: float = 15.0,
 ) -> FPSTestResult:
     """Test FPS with video encoding enabled."""
-
     print(f"\n{'=' * 60}")
     print(f"Testing FPS: {target_fps} WITH VIDEO ENCODING")
     print(f"{'=' * 60}")
@@ -124,7 +122,7 @@ async def test_streaming_fps(
 
                 print(
                     f"  [{elapsed:.1f}s] In: {frames_in} | Enc: {stats['frames_encoded']} | "
-                    f"Lag: {lag} | Mem: {current_mem:.1f}MB"
+                    f"Lag: {lag} | Mem: {current_mem:.1f}MB",
                 )
                 last_report = time.perf_counter()
 
@@ -179,13 +177,12 @@ async def test_streaming_fps(
 
 def print_results(results: list[FPSTestResult]) -> None:
     """Print a summary table of all results."""
-
     print("\n" + "=" * 100)
     print("                              FPS TEST RESULTS SUMMARY")
     print("=" * 100)
     print(
         f"{'Target':>8} | {'CapFPS':>8} | {'EncFPS':>8} | {'Lag(avg)':>8} | "
-        f"{'MemStart':>10} | {'MemEnd':>10} | {'MemPeak':>10} | {'Status':>8}"
+        f"{'MemStart':>10} | {'MemEnd':>10} | {'MemPeak':>10} | {'Status':>8}",
     )
     print("-" * 100)
 
@@ -195,7 +192,7 @@ def print_results(results: list[FPSTestResult]) -> None:
             f"{r.target_fps:>8} | {r.actual_capture_fps:>8.1f} | {r.actual_encode_fps:>8.1f} | "
             f"{r.avg_lag_chunks:>8.1f} | "
             f"{r.memory_start_mb:>9.1f}M | {r.memory_end_mb:>9.1f}M | "
-            f"{r.memory_peak_mb:>9.1f}M | {status}"
+            f"{r.memory_peak_mb:>9.1f}M | {status}",
         )
 
     print("=" * 100)

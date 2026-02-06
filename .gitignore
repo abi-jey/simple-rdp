@@ -6,7 +6,7 @@ __pycache__/
 # Environment variables (contains secrets)
 .env
 !.env.example
-
+adk_agent_data.db
 # Session recordings and temp files
 sessions/
 *.png

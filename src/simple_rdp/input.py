@@ -1,5 +1,4 @@
-"""
-Input types and utilities for RDP sessions.
+"""Input types and utilities for RDP sessions.
 
 Provides enums and dataclasses for mouse and keyboard input.
 The actual input transmission is handled by RDPClient methods.
@@ -46,4 +45,4 @@ class KeyEvent:
     modifiers: tuple[KeyModifier, ...] = ()
 
 
-__all__ = ["MouseButton", "KeyModifier", "MouseEvent", "KeyEvent"]
+__all__ = ["KeyEvent", "KeyModifier", "MouseButton", "MouseEvent"]

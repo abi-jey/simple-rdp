@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Graphics-Intensive RDP Performance Test
+"""Graphics-Intensive RDP Performance Test
 - Opens Task Manager, Windows Search, Edge browser repeatedly
 - Captures screen at 10 FPS
 - Creates video from captured frames
@@ -83,8 +82,7 @@ async def capture_at_10fps(client: RDPClient, metrics: PerformanceMetrics, stop_
 
 
 async def graphic_intensive_actions(client: RDPClient, duration_seconds: int = 60):
-    """
-    Perform graphic-intensive UI actions every 0.5 seconds.
+    """Perform graphic-intensive UI actions every 0.5 seconds.
     Uses keyboard shortcuts to open/close windows rapidly.
     """
     print(f"\n=== Starting {duration_seconds}s of graphic-intensive actions ===\n")

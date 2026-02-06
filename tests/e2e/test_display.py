@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-E2E Test for Display Class - Video Streaming Pipeline.
+"""E2E Test for Display Class - Video Streaming Pipeline.
 
 Tests the new Display architecture:
 - "Always-on" background streaming (fMP4)
@@ -46,7 +45,7 @@ async def consume_video_stream(client: RDPClient, duration: int):
                 stats = client.get_pipeline_stats()
                 print(
                     f"  [Consumer] Rx {chunk_count} chunks | Lag: {stats.consumer_lag_chunks} | "
-                    f"E2E Latency Est: {stats.total_e2e_estimate_ms:.1f}ms"
+                    f"E2E Latency Est: {stats.total_e2e_estimate_ms:.1f}ms",
                 )
         else:
             # Timeout implies no data or stream ended
@@ -77,7 +76,13 @@ async def run_test(duration: int):
 
     # Initialize client with recording enabled
     client = RDPClient(
-        host, username=username, password=password, width=1920, height=1080, capture_fps=30, record_to=recording_path
+        host,
+        username=username,
+        password=password,
+        width=1920,
+        height=1080,
+        capture_fps=30,
+        record_to=recording_path,
     )
 
     try:

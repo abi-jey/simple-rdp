@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Graphics-Intensive RDP Performance Test with cProfile + snakeviz profiling.
+"""Graphics-Intensive RDP Performance Test with cProfile + snakeviz profiling.
 
 Run this script, then visualize with:
     snakeviz sessions/graphics_XXXX/profile.prof
@@ -97,8 +96,7 @@ async def capture_at_10fps(client: RDPClient, metrics: PerformanceMetrics, stop_
 
 
 async def graphic_intensive_actions(client: RDPClient, duration_seconds: int = 30):
-    """
-    Perform graphic-intensive UI actions every 0.5 seconds.
+    """Perform graphic-intensive UI actions every 0.5 seconds.
     Shorter duration for profiling.
     """
     print(f"\n=== Starting {duration_seconds}s of graphic-intensive actions ===\n")

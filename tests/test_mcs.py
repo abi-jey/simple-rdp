@@ -473,7 +473,7 @@ class TestMcsParsingFunctions:
                 0xEB,  # Requested channel (1003)
                 0x03,
                 0xEB,  # Joined channel (1003)
-            ]
+            ],
         )
         result = parse_mcs_channel_join_confirm(data)
         assert isinstance(result, dict)

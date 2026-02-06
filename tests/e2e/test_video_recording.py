@@ -1,5 +1,4 @@
-"""
-Video recording of RDP session with automated interactions.
+"""Video recording of RDP session with automated interactions.
 
 This example demonstrates:
 - Native file recording using library's built-in ffmpeg streaming
@@ -22,8 +21,7 @@ load_dotenv()
 
 
 async def perform_interactions(client: RDPClient) -> None:
-    """
-    Perform automated mouse and keyboard interactions.
+    """Perform automated mouse and keyboard interactions.
 
     This runs for approximately 1 minute, performing various UI interactions.
     """

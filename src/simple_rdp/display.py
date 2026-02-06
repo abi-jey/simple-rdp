@@ -1,5 +1,4 @@
-"""
-Display - Handles screen capture and video encoding from RDP sessions.
+"""Display - Handles screen capture and video encoding from RDP sessions.
 
 Provides a Display class that manages:
 - Screen buffer (PIL Image of current screen state)
@@ -53,8 +52,7 @@ logger = getLogger(__name__)
 
 
 def _create_default_pointer() -> Image.Image:
-    """
-    Create a default arrow pointer image.
+    """Create a default arrow pointer image.
 
     Returns a 16x24 pixel white arrow cursor with black outline,
     similar to the standard Windows arrow cursor.
@@ -131,8 +129,7 @@ class VideoChunk:
 
 @dataclass
 class PipelineStats:
-    """
-    Statistics for the video encoding pipeline.
+    """Statistics for the video encoding pipeline.
 
     These stats help diagnose latency and throughput issues in the
     bitmap → display → ffmpeg → output pipeline.
@@ -148,6 +145,7 @@ class PipelineStats:
         queue_drops: Number of chunks dropped due to full queue.
         bitmaps_applied: Number of bitmap updates applied to display.
         consumer_lag_chunks: Current number of chunks waiting in queue.
+
     """
 
     bitmap_to_buffer_ms: float = 0.0
@@ -166,8 +164,7 @@ class PipelineStats:
 
 
 class Display:
-    """
-    Manages screen capture and video encoding.
+    """Manages screen capture and video encoding.
 
     Features:
     - Screen buffer (PIL Image representing current screen state)
@@ -211,8 +208,7 @@ class Display:
         fps: int = 30,
         queue_size: int = DEFAULT_QUEUE_SIZE,
     ) -> None:
-        """
-        Initialize the display manager.
+        """Initialize the display manager.
 
         Args:
             width: Frame width in pixels.
@@ -220,6 +216,7 @@ class Display:
             fps: Target frames per second for video encoding.
             queue_size: Maximum video chunks in queue before dropping.
                         Default is 600 (~20 seconds at 30fps).
+
         """
         self._width = width
         self._height = height
@@ -318,8 +315,7 @@ class Display:
 
     @property
     def effective_fps(self) -> float:
-        """
-        Return the actual frames per second being received.
+        """Return the actual frames per second being received.
 
         Calculated from frames received since first frame.
         Returns 0 if not enough data.
@@ -333,8 +329,7 @@ class Display:
 
     @property
     def consumer_lag_chunks(self) -> int:
-        """
-        Return the number of chunks waiting in the queue.
+        """Return the number of chunks waiting in the queue.
 
         This indicates how far behind a consumer calling get_next_video_chunk() is:
         - 0-10: Consumer is keeping up well
@@ -347,8 +342,7 @@ class Display:
         return self._video_queue.qsize()
 
     def is_consumer_behind(self, threshold: int = 10) -> bool:
-        """
-        Check if the consumer is falling behind.
+        """Check if the consumer is falling behind.
 
         Args:
             threshold: Number of queued chunks considered "behind". Default is 10.
@@ -359,6 +353,7 @@ class Display:
         Example:
             >>> if display.is_consumer_behind():
             ...     logger.warning("Video consumer is falling behind!")
+
         """
         return self._video_queue.qsize() > threshold
 
@@ -373,8 +368,7 @@ class Display:
         return self._stats.copy()
 
     def get_pipeline_stats(self) -> PipelineStats:
-        """
-        Get detailed pipeline statistics including latency measurements.
+        """Get detailed pipeline statistics including latency measurements.
 
         Returns:
             PipelineStats dataclass with timing and counter information.
@@ -383,6 +377,7 @@ class Display:
             >>> stats = display.get_pipeline_stats()
             >>> print(f"E2E latency: {stats.total_e2e_estimate_ms:.1f}ms")
             >>> print(f"Consumer lag: {stats.consumer_lag_chunks} chunks")
+
         """
         # Calculate averages from rolling windows
         avg_bitmap = (
@@ -461,8 +456,7 @@ class Display:
         image: Image.Image | None = None,
         hotspot: tuple[int, int] | None = None,
     ) -> bool:
-        """
-        Update pointer state with FPS-based rate limiting.
+        """Update pointer state with FPS-based rate limiting.
 
         Args:
             x: New X position (or None to keep current).
@@ -473,6 +467,7 @@ class Display:
 
         Returns:
             True if update was applied, False if throttled.
+
         """
         now = time.time()
 
@@ -500,11 +495,11 @@ class Display:
         return True
 
     async def screenshot(self) -> Image.Image:
-        """
-        Capture the current screen with pointer composited.
+        """Capture the current screen with pointer composited.
 
         Returns:
             PIL Image of the current screen state with pointer overlay.
+
         """
         async with self._screen_lock:
             if self._raw_display_image is None:
@@ -518,19 +513,18 @@ class Display:
             return self._final_display_image.copy()
 
     async def save_screenshot(self, path: str) -> None:
-        """
-        Save a screenshot to a file.
+        """Save a screenshot to a file.
 
         Args:
             path: File path to save the screenshot.
+
         """
         img = await self.screenshot()
         img.save(path)
         logger.info(f"Screenshot saved to {path}")
 
     async def screenshot_with_crop(self, top_left: tuple[int, int], bottom_right: tuple[int, int]) -> Image.Image:
-        """
-        Capture a cropped area of the screen.
+        """Capture a cropped area of the screen.
 
         Args:
             top_left: (x, y) coordinates of the top-left corner of the crop area.
@@ -538,6 +532,7 @@ class Display:
 
         Returns:
             Cropped PIL Image of the specified region with pointer composited.
+
         """
         async with self._screen_lock:
             if self._raw_display_image is None:
@@ -565,8 +560,7 @@ class Display:
             return cropped.copy()
 
     async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
-        """
-        Capture a cropped area around the pointer position.
+        """Capture a cropped area around the pointer position.
 
         The crop is 1/3 width x 1/3 height of the display (1/9 of total area),
         centered on the pointer position when possible. When the pointer is
@@ -577,6 +571,7 @@ class Display:
             - cropped_image: Cropped region with pointer composited
             - (top_x, top_y): Top-left corner position of crop relative to display
             - (bottom_x, bottom_y): Bottom-right corner position of crop relative to display
+
         """
         async with self._screen_lock:
             if self._raw_display_image is None:
@@ -620,8 +615,7 @@ class Display:
         data: bytes,
         bpp: int = 32,
     ) -> None:
-        """
-        Apply a bitmap update to the screen buffer.
+        """Apply a bitmap update to the screen buffer.
 
         This is called by the RDP client when it receives bitmap updates
         from the server.
@@ -633,6 +627,7 @@ class Display:
             height: Bitmap height.
             data: Raw bitmap data (already decompressed, RGB format).
             bpp: Bits per pixel of the source data.
+
         """
         apply_start = time.perf_counter()
 
@@ -686,8 +681,7 @@ class Display:
             self._bitmap_apply_times.pop(0)
 
     async def start_streaming(self) -> None:
-        """
-        Start video streaming.
+        """Start video streaming.
 
         Frames are encoded to fragmented MP4 format. Output is available via:
         - get_next_video_chunk(): Real-time streaming to consumers
@@ -770,12 +764,12 @@ class Display:
         logger.info("Streaming encoder started")
 
     async def stop_streaming(self, record_to: str | None = None) -> None:
-        """
-        Stop video streaming and optionally save recording.
+        """Stop video streaming and optionally save recording.
 
         Args:
             record_to: If provided, transcode the temp recording to this path (MP4).
                       If None, the temp file is deleted.
+
         """
         if not self._streaming:
             return
@@ -868,14 +862,14 @@ class Display:
                 break
 
     async def add_frame(self, image: Image.Image) -> None:
-        """
-        Add a frame from a PIL Image.
+        """Add a frame from a PIL Image.
 
         This converts the image to raw RGB bytes and sends to ffmpeg
         for encoding. The pointer is composited onto the frame.
 
         Args:
             image: PIL Image to add (will be converted to RGB if needed).
+
         """
         # Update final display image with pointer composited
         if self._final_display_image_dirty or self._final_display_image is None:
@@ -891,11 +885,11 @@ class Display:
         await self.add_raw_frame(raw_data)
 
     async def add_raw_frame(self, data: bytes) -> None:
-        """
-        Add a raw RGB frame.
+        """Add a raw RGB frame.
 
         Args:
             data: Raw RGB24 bytes (width * height * 3 bytes).
+
         """
         timestamp = time.time()
 
@@ -951,7 +945,7 @@ class Display:
             f"encode={avg_encode_ms:.1f}ms/frame | "
             f"queue={queue_size}/{self._queue_size} ({queue_pct:.0f}%) | "
             f"drops={self._stats['queue_drops']} | "
-            f"fps_in={self._frames_since_diag / self._diag_interval:.1f}"
+            f"fps_in={self._frames_since_diag / self._diag_interval:.1f}",
         )
 
         self._frames_since_diag = 0
@@ -1016,8 +1010,7 @@ class Display:
                 await asyncio.sleep(0.01)
 
     async def get_next_video_chunk(self, timeout: float = 1.0) -> VideoChunk | None:
-        """
-        Wait for and return the next video chunk.
+        """Wait for and return the next video chunk.
 
         This is the primary method for real-time video streaming consumers.
         Chunks are fragmented MP4 data that can be fed to a media source.
@@ -1033,6 +1026,7 @@ class Display:
             ...     chunk = await display.get_next_video_chunk()
             ...     if chunk:
             ...         websocket.send(chunk.data)
+
         """
         try:
             return await asyncio.wait_for(self._video_queue.get(), timeout=timeout)
@@ -1041,8 +1035,7 @@ class Display:
 
     @staticmethod
     def transcode(input_path: str, output_path: str) -> bool:
-        """
-        Transcode a video file to another format.
+        """Transcode a video file to another format.
 
         Uses ffmpeg with stream copy (no re-encoding) for fast conversion.
         Typically used to convert MPEG-TS temp files to MP4.
@@ -1053,6 +1046,7 @@ class Display:
 
         Returns:
             True if successful, False otherwise.
+
         """
         try:
             subprocess.run(

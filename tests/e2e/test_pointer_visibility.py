@@ -1,5 +1,4 @@
-"""
-Pointer visibility test - Verifies cursor compositing in recordings.
+"""Pointer visibility test - Verifies cursor compositing in recordings.
 
 This test specifically tests pointer visibility with clear movement patterns:
 - Rectangular path around screen edges
@@ -25,8 +24,7 @@ load_dotenv()
 
 
 async def rectangular_pattern(client: RDPClient, width: int, height: int) -> None:
-    """
-    Move mouse in a rectangular pattern around screen edges.
+    """Move mouse in a rectangular pattern around screen edges.
 
     This creates a clear, visible path that's easy to verify in recordings.
     """
@@ -58,8 +56,7 @@ async def rectangular_pattern(client: RDPClient, width: int, height: int) -> Non
 
 
 async def circular_pattern(client: RDPClient, width: int, height: int) -> None:
-    """
-    Move mouse in a circular pattern in the center of the screen.
+    """Move mouse in a circular pattern in the center of the screen.
 
     Creates a smooth circular motion that's visually distinct.
     """
@@ -80,8 +77,7 @@ async def circular_pattern(client: RDPClient, width: int, height: int) -> None:
 
 
 async def diagonal_selection_pattern(client: RDPClient, width: int, height: int) -> None:
-    """
-    Perform diagonal selection (drag) patterns.
+    """Perform diagonal selection (drag) patterns.
 
     Simulates selection boxes being drawn diagonally across the screen.
     """
@@ -125,8 +121,7 @@ async def diagonal_selection_pattern(client: RDPClient, width: int, height: int)
 
 
 async def spiral_pattern(client: RDPClient, width: int, height: int) -> None:
-    """
-    Move mouse in a spiral pattern from center outward.
+    """Move mouse in a spiral pattern from center outward.
 
     Creates an expanding spiral that's visually interesting.
     """
@@ -151,9 +146,7 @@ async def spiral_pattern(client: RDPClient, width: int, height: int) -> None:
 
 
 async def perform_pointer_test(client: RDPClient) -> None:
-    """
-    Perform all pointer visibility tests.
-    """
+    """Perform all pointer visibility tests."""
     print("\n=== Pointer Visibility Test ===")
     print("Testing pointer compositing with various movement patterns...")
 

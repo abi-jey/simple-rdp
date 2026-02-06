@@ -1,5 +1,4 @@
-"""
-MCS (Multipoint Communication Service) layer implementation.
+"""MCS (Multipoint Communication Service) layer implementation.
 
 This module implements T.125 MCS PDUs for the RDP connection sequence.
 """
@@ -48,12 +47,11 @@ def _ber_write_length(length: int) -> bytes:
     """Encode length in BER definite form."""
     if length < 0x80:
         return bytes([length])
-    elif length < 0x100:
+    if length < 0x100:
         return bytes([0x81, length])
-    elif length < 0x10000:
+    if length < 0x10000:
         return bytes([0x82, (length >> 8) & 0xFF, length & 0xFF])
-    else:
-        raise ValueError(f"Length too large: {length}")
+    raise ValueError(f"Length too large: {length}")
 
 
 def _ber_write_integer(value: int) -> bytes:
@@ -90,18 +88,16 @@ def _ber_write_application_tag(tag: int, content: bytes) -> bytes:
     # For tags > 30, use multi-byte encoding
     if tag > 30:
         return bytes([0x7F, tag]) + _ber_write_length(len(content)) + content
-    else:
-        return bytes([0x60 | tag]) + _ber_write_length(len(content)) + content
+    return bytes([0x60 | tag]) + _ber_write_length(len(content)) + content
 
 
 def _per_write_length(length: int) -> bytes:
     """Encode length in PER format."""
     if length < 0x80:
         return bytes([length])
-    elif length < 0x4000:
+    if length < 0x4000:
         return bytes([0x80 | ((length >> 8) & 0x3F), length & 0xFF])
-    else:
-        raise ValueError(f"Length too large for PER: {length}")
+    raise ValueError(f"Length too large for PER: {length}")
 
 
 def build_domain_parameters(
@@ -259,11 +255,11 @@ def build_client_security_data(
 
 
 def build_client_network_data(channels: list[tuple[str, int]] | None = None) -> bytes:
-    """
-    Build Client Network Data (TS_UD_CS_NET).
+    """Build Client Network Data (TS_UD_CS_NET).
 
     Args:
         channels: List of (name, options) tuples for virtual channels.
+
     """
     if channels is None:
         channels = []
@@ -315,8 +311,7 @@ def build_client_cluster_data(
 
 
 def build_gcc_conference_create_request(user_data: bytes) -> bytes:
-    """
-    Build PER-encoded GCC Conference Create Request.
+    """Build PER-encoded GCC Conference Create Request.
 
     This wraps the user data in the GCC/T.124 structure.
     """
@@ -352,8 +347,7 @@ def build_gcc_conference_create_request(user_data: bytes) -> bytes:
 
 
 def build_gcc_connect_data(gcc_ccr: bytes) -> bytes:
-    """
-    Build PER-encoded GCC Connect Data wrapper.
+    """Build PER-encoded GCC Connect Data wrapper.
 
     This wraps the GCC Conference Create Request.
     """
@@ -383,14 +377,14 @@ def build_mcs_connect_initial(
     min_params: bytes | None = None,
     max_params: bytes | None = None,
 ) -> bytes:
-    """
-    Build MCS Connect Initial PDU.
+    """Build MCS Connect Initial PDU.
 
     Args:
         user_data: The GCC user data (client data blocks)
         target_params: Target domain parameters (optional)
         min_params: Minimum domain parameters (optional)
         max_params: Maximum domain parameters (optional)
+
     """
     # Default domain parameters if not provided
     if target_params is None:
@@ -444,8 +438,7 @@ def build_mcs_connect_initial(
 
 
 def _per_write_integer(value: int) -> bytes:
-    """
-    Encode an integer in PER (unaligned) format for MCS PDUs.
+    """Encode an integer in PER (unaligned) format for MCS PDUs.
 
     For MCS Erect Domain Request, integers are encoded as:
     - 1 byte length prefix (number of bytes - 1)
@@ -456,15 +449,13 @@ def _per_write_integer(value: int) -> bytes:
     """
     if value < 256:
         return bytes([0x01, value])
-    elif value < 65536:
+    if value < 65536:
         return bytes([0x02, (value >> 8) & 0xFF, value & 0xFF])
-    else:
-        raise ValueError(f"Integer too large for PER encoding: {value}")
+    raise ValueError(f"Integer too large for PER encoding: {value}")
 
 
 def build_mcs_erect_domain_request(sub_height: int = 0, sub_interval: int = 0) -> bytes:
-    """
-    Build MCS Erect Domain Request PDU.
+    """Build MCS Erect Domain Request PDU.
 
     Per MS-RDPBCGR section 2.2.1.5, the format is:
     - Type: 0x04 (1 byte)
@@ -503,8 +494,7 @@ def build_mcs_send_data_request(
     segmentation: int = 3,  # Begin + End
     user_data: bytes = b"",
 ) -> bytes:
-    """
-    Build MCS Send Data Request PDU.
+    """Build MCS Send Data Request PDU.
 
     The type byte is already encoded as choice 25 << 2 = 0x64.
     Lower 2 bits are used for data priority.
@@ -541,8 +531,7 @@ def build_mcs_send_data_request(
 
 
 def parse_mcs_connect_response(data: bytes) -> dict[str, Any]:
-    """
-    Parse MCS Connect Response PDU.
+    """Parse MCS Connect Response PDU.
 
     Returns dict with: result, called_connect_id, domain_params, user_data
     """
@@ -564,10 +553,10 @@ def parse_mcs_connect_response(data: bytes) -> dict[str, Any]:
     # Parse length
     if data[offset] & 0x80:
         num_len_bytes = data[offset] & 0x7F
-        _length = int.from_bytes(data[offset + 1 : offset + 1 + num_len_bytes], "big")  # noqa: F841
+        _length = int.from_bytes(data[offset + 1 : offset + 1 + num_len_bytes], "big")
         offset += 1 + num_len_bytes
     else:
-        _length = data[offset]  # noqa: F841
+        _length = data[offset]
         offset += 1
 
     # Parse result (ENUMERATED)
@@ -720,8 +709,7 @@ def _parse_server_network_data(data: bytes) -> dict[str, Any]:
 
 
 def parse_mcs_attach_user_confirm(data: bytes) -> dict[str, Any]:
-    """
-    Parse MCS Attach User Confirm PDU.
+    """Parse MCS Attach User Confirm PDU.
 
     PER encoding (from MS-RDPBCGR example 2e 00 00 06):
     Byte 0: bits 7-2 = choice (11 for attachUserConfirm)
@@ -763,8 +751,7 @@ def parse_mcs_attach_user_confirm(data: bytes) -> dict[str, Any]:
 
 
 def parse_mcs_channel_join_confirm(data: bytes) -> dict[str, Any]:
-    """
-    Parse MCS Channel Join Confirm PDU.
+    """Parse MCS Channel Join Confirm PDU.
 
     PER encoding (from MS-RDPBCGR example 3e 00 00 06 03 ef 03 ef):
     Byte 0: bits 7-2 = choice (15 for channelJoinConfirm)
@@ -808,7 +795,7 @@ def parse_mcs_channel_join_confirm(data: bytes) -> dict[str, Any]:
 
     logger.debug(
         f"Channel Join Confirm: type={mcs_type}, result={result_value}, "
-        f"user_id={user_id}, requested={requested_channel}, channel_id={result['channel_id']}"
+        f"user_id={user_id}, requested={requested_channel}, channel_id={result['channel_id']}",
     )
 
     return result

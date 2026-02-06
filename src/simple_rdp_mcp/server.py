@@ -1,5 +1,4 @@
-"""
-Simple RDP MCP Server.
+"""Simple RDP MCP Server.
 
 This module provides an MCP server that exposes RDP client capabilities
 as tools for LLM agents to interact with remote Windows desktops.
@@ -40,10 +39,10 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Annotated
 
+from PIL import Image
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from fastmcp.utilities.types import Image as MCPImage
-from PIL import Image
 from pydantic import Field
 
 from simple_rdp import RDPClient
@@ -276,8 +275,7 @@ async def connect(
     height: int = 1080,
     record_session: str | None = None,
 ) -> dict[str, str | int | bool]:
-    """
-    Connect to an RDP server programmatically.
+    """Connect to an RDP server programmatically.
 
     This is for direct Python usage, not through MCP.
     For MCP, the connection is established via environment variables on startup.
@@ -294,6 +292,7 @@ async def connect(
 
     Returns:
         Connection status and desktop dimensions.
+
     """
     global _session
 
@@ -341,13 +340,13 @@ async def connect(
 
 
 async def disconnect() -> dict[str, str | bool | None]:
-    """
-    Disconnect from the current RDP session.
+    """Disconnect from the current RDP session.
 
     Also stops and saves any active recording.
 
     Returns:
         Disconnection status.
+
     """
     global _session
 
@@ -377,22 +376,21 @@ async def disconnect() -> dict[str, str | bool | None]:
 
 
 async def screenshot() -> Image.Image:
-    """
-    Capture a screenshot of the remote desktop.
+    """Capture a screenshot of the remote desktop.
 
     Returns:
         PIL Image of the current screen.
 
     Raises:
         RuntimeError: If not connected to RDP server.
+
     """
     session = get_session()
     return await session.client.screenshot()
 
 
 async def mouse_move(x: int, y: int) -> dict[str, str | int]:
-    """
-    Move the mouse cursor to a specific position.
+    """Move the mouse cursor to a specific position.
 
     Args:
         x: X coordinate (pixels from left edge).
@@ -400,6 +398,7 @@ async def mouse_move(x: int, y: int) -> dict[str, str | int]:
 
     Returns:
         Action confirmation with coordinates.
+
     """
     session = get_session()
     await session.client.mouse_move(x, y)
@@ -412,8 +411,7 @@ async def mouse_click(
     button: str = "left",
     double_click: bool = False,
 ) -> dict[str, str | int | bool]:
-    """
-    Click the mouse at a specific position.
+    """Click the mouse at a specific position.
 
     Args:
         x: X coordinate for the click.
@@ -423,6 +421,7 @@ async def mouse_click(
 
     Returns:
         Action confirmation with coordinates and button.
+
     """
     session = get_session()
     button_map = {"left": 1, "right": 2, "middle": 3}
@@ -443,8 +442,7 @@ async def mouse_drag(
     end_y: int,
     button: str = "left",
 ) -> dict[str, str | int]:
-    """
-    Drag the mouse from one position to another.
+    """Drag the mouse from one position to another.
 
     Args:
         start_x: Starting X coordinate.
@@ -455,6 +453,7 @@ async def mouse_drag(
 
     Returns:
         Action confirmation with coordinates.
+
     """
     session = get_session()
     button_map = {"left": 1, "right": 2, "middle": 3}
@@ -471,8 +470,7 @@ async def mouse_drag(
 
 
 async def mouse_wheel(x: int, y: int, delta: int) -> dict[str, str | int]:
-    """
-    Scroll the mouse wheel at a specific position.
+    """Scroll the mouse wheel at a specific position.
 
     Args:
         x: X coordinate for the scroll.
@@ -481,6 +479,7 @@ async def mouse_wheel(x: int, y: int, delta: int) -> dict[str, str | int]:
 
     Returns:
         Action confirmation.
+
     """
     session = get_session()
     await session.client.mouse_wheel(x, y, delta)
@@ -488,14 +487,14 @@ async def mouse_wheel(x: int, y: int, delta: int) -> dict[str, str | int]:
 
 
 async def type_text(text: str) -> dict[str, str | int]:
-    """
-    Type text on the remote desktop.
+    """Type text on the remote desktop.
 
     Args:
         text: Text to type (supports Unicode).
 
     Returns:
         Action confirmation with text length.
+
     """
     session = get_session()
     await session.client.send_text(text)
@@ -611,8 +610,7 @@ async def send_key(
     key: str,
     modifiers: list[str] | None = None,
 ) -> dict[str, str | list[str] | None]:
-    """
-    Send a keyboard key press.
+    """Send a keyboard key press.
 
     Args:
         key: Key to send. Can be a single character, key name, or hex scancode.
@@ -620,6 +618,7 @@ async def send_key(
 
     Returns:
         Action confirmation.
+
     """
     session = get_session()
     client = session.client
@@ -671,11 +670,11 @@ async def send_key(
 
 
 async def status() -> dict[str, str | int | bool | None]:
-    """
-    Get the current RDP connection status.
+    """Get the current RDP connection status.
 
     Returns:
         Connection status and desktop dimensions.
+
     """
     if _session is None:
         return {
@@ -696,11 +695,11 @@ async def status() -> dict[str, str | int | bool | None]:
 
 
 async def start_recording() -> dict[str, str | bool]:
-    """
-    Start recording the session.
+    """Start recording the session.
 
     Returns:
         Status confirmation.
+
     """
     session = get_session()
     await session.start_recording()
@@ -708,14 +707,14 @@ async def start_recording() -> dict[str, str | bool]:
 
 
 async def stop_recording(save_path: str) -> dict[str, str | bool | None]:
-    """
-    Stop recording and save to file.
+    """Stop recording and save to file.
 
     Args:
         save_path: Path to save the recording.
 
     Returns:
         Status confirmation with saved path.
+
     """
     session = get_session()
     saved = await session.stop_recording(save_path)
@@ -804,8 +803,7 @@ mcp = FastMCP(
 
 @mcp.tool(annotations={"title": "Take Screenshot", "readOnlyHint": True})
 async def rdp_screenshot() -> MCPImage:
-    """
-    Capture a screenshot of the remote desktop.
+    """Capture a screenshot of the remote desktop.
 
     Returns the current screen as an image.
     """
@@ -884,13 +882,13 @@ async def rdp_send_key(
     ],
     modifiers: Annotated[list[str] | None, "Modifier keys: 'ctrl', 'alt', 'shift', 'win'"] = None,
 ) -> dict[str, str | list[str] | None]:
-    """
-    Send a keyboard key press.
+    """Send a keyboard key press.
 
     Examples:
     - Send Enter: rdp_send_key("enter")
     - Copy: rdp_send_key("c", modifiers=["ctrl"])
     - Alt+Tab: rdp_send_key("tab", modifiers=["alt"])
+
     """
     return await send_key(key, modifiers)
 

@@ -1,5 +1,4 @@
-"""
-RDP Capabilities implementation.
+"""RDP Capabilities implementation.
 
 This module handles capability sets for the RDP capability exchange phase.
 """
@@ -192,8 +191,7 @@ def build_bitmap_capability(
 
 
 def build_order_capability() -> bytes:
-    """
-    Build Order Capability Set.
+    """Build Order Capability Set.
 
     We disable all drawing order support to force the server to send
     bitmap updates instead, which are easier to process for screenshot
@@ -582,8 +580,7 @@ def build_frame_acknowledge_capability(max_unacknowledged_frames: int = 2) -> by
 
 
 def build_client_capabilities(width: int = 1920, height: int = 1080, bpp: int = 32) -> bytes:
-    """
-    Build combined client capability sets for Confirm Active PDU.
+    """Build combined client capability sets for Confirm Active PDU.
 
     Returns the capabilities data including the count and padding.
     """

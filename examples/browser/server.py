@@ -1,5 +1,4 @@
-"""
-FastAPI server for RDP browser viewer.
+"""FastAPI server for RDP browser viewer.
 
 Connects to an RDP server and streams H.264 video to the browser via MPEG-TS.
 """
@@ -285,7 +284,7 @@ async def connect() -> dict[str, str | bool | None]:
                     "connected": rdp_client.is_connected if rdp_client else False,
                     "host": os.getenv("RDP_HOST", ""),
                     "error": connection_error,
-                }
+                },
             )
 
     return {
@@ -296,8 +295,7 @@ async def connect() -> dict[str, str | bool | None]:
 
 
 async def video_stream_generator() -> AsyncIterator[bytes]:
-    """
-    Generator that yields fragmented MP4 video chunks from the Display streaming.
+    """Generator that yields fragmented MP4 video chunks from the Display streaming.
 
     This uses the Display's efficient ffmpeg-based encoding which produces
     H.264 video in fragmented MP4 format for MSE browser compatibility.
@@ -383,8 +381,7 @@ async def video_stream_generator() -> AsyncIterator[bytes]:
 
 @app.get("/video")
 async def video_stream() -> StreamingResponse:
-    """
-    HTTP endpoint for fragmented MP4 video streaming.
+    """HTTP endpoint for fragmented MP4 video streaming.
 
     Uses the Display's ffmpeg-based H.264 encoding for efficient streaming.
     The browser can consume this directly with a <video> element using MSE
@@ -406,8 +403,7 @@ async def video_stream() -> StreamingResponse:
 
 @app.websocket("/ws/video")
 async def websocket_video(websocket: WebSocket) -> None:
-    """
-    WebSocket endpoint for video streaming.
+    """WebSocket endpoint for video streaming.
 
     Sends binary video chunks over WebSocket for lower latency.
     Better connection state awareness and reconnection handling.
@@ -539,7 +535,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             "connected": rdp_client.is_connected if rdp_client else False,
             "host": os.getenv("RDP_HOST", ""),
             "error": connection_error,
-        }
+        },
     )
 
     try:

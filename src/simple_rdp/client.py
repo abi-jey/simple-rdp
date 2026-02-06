@@ -1,6 +1,4 @@
-"""
-RDP Client - Main client class for establishing RDP connections.
-"""
+"""RDP Client - Main client class for establishing RDP connections."""
 
 import asyncio
 import contextlib
@@ -183,8 +181,7 @@ KEY_MAP: dict[str, int] = {
 
 
 class RDPClient:
-    """
-    RDP Client for automation purposes.
+    """RDP Client for automation purposes.
 
     This client establishes an RDP connection and provides access to
     screen capture and input transmission for automation workflows.
@@ -215,8 +212,7 @@ class RDPClient:
         capture_fps: int = 30,
         record_to: str | None = None,
     ) -> None:
-        """
-        Initialize the RDP client.
+        """Initialize the RDP client.
 
         Args:
             host: The hostname or IP address of the RDP server.
@@ -232,6 +228,7 @@ class RDPClient:
             record_to: If provided, save the session recording to this path (MP4) on disconnect.
                       The recording is always captured to a temp file; this controls whether
                       it's transcoded and saved when the session ends.
+
         """
         self._host = host
         self._port = port
@@ -347,8 +344,7 @@ class RDPClient:
 
     @property
     def display(self) -> Display:
-        """
-        Return the Display component for screen capture and video recording.
+        """Return the Display component for screen capture and video recording.
 
         The Display handles:
         - Screen buffer management
@@ -374,8 +370,7 @@ class RDPClient:
 
     @property
     def consumer_lag_chunks(self) -> int:
-        """
-        Return the number of video chunks waiting in the queue.
+        """Return the number of video chunks waiting in the queue.
 
         This indicates how far behind a consumer calling get_next_video_chunk() is:
         - 0-10: Consumer is keeping up well
@@ -386,23 +381,23 @@ class RDPClient:
         return self._display.consumer_lag_chunks
 
     def is_consumer_behind(self, threshold: int = 10) -> bool:
-        """
-        Check if the video consumer is falling behind.
+        """Check if the video consumer is falling behind.
 
         Args:
             threshold: Number of queued chunks considered "behind". Default is 10.
 
         Returns:
             True if consumer_lag_chunks > threshold.
+
         """
         return self._display.is_consumer_behind(threshold)
 
     async def connect(self) -> None:
-        """
-        Establish connection to the RDP server.
+        """Establish connection to the RDP server.
 
         Raises:
             ConnectionError: If connection cannot be established.
+
         """
         # Phase 1: Connection Initiation
         await self._start_tcp_connection()
@@ -458,8 +453,7 @@ class RDPClient:
         logger.info("RDP connection established successfully")
 
     async def disconnect(self) -> None:
-        """
-        Disconnect from the RDP server.
+        """Disconnect from the RDP server.
 
         If record_to was provided in __init__, the session recording is
         transcoded to MP4 and saved to that path.
@@ -510,17 +504,16 @@ class RDPClient:
     # ==================== Screen Capture ====================
 
     async def screenshot(self) -> Image.Image:
-        """
-        Capture the current screen.
+        """Capture the current screen.
 
         Returns:
             PIL Image of the current screen state.
+
         """
         return await self._display.screenshot()
 
     async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
-        """
-        Capture a cropped area around the pointer position.
+        """Capture a cropped area around the pointer position.
 
         The crop is 1/3 width x 1/3 height of the display (1/9 of total area),
         centered on the pointer position when possible. When the pointer is
@@ -531,12 +524,12 @@ class RDPClient:
             - cropped_image: Cropped region with pointer composited
             - (top_x, top_y): Top-left corner position of crop relative to display
             - (bottom_x, bottom_y): Bottom-right corner position of crop relative to display
+
         """
         return await self._display.pointer_area_screenshot()
 
     async def screenshot_with_crop(self, top_left: tuple[int, int], bottom_right: tuple[int, int]) -> Image.Image:
-        """
-        Capture a cropped area of the screen.
+        """Capture a cropped area of the screen.
 
         Args:
             top_left: (x, y) coordinates of the top-left corner of the crop area.
@@ -544,23 +537,23 @@ class RDPClient:
 
         Returns:
             Cropped PIL Image of the specified region with pointer composited.
+
         """
         return await self._display.screenshot_with_crop(top_left, bottom_right)
 
     async def save_screenshot(self, path: str) -> None:
-        """
-        Save a screenshot to a file.
+        """Save a screenshot to a file.
 
         Args:
             path: File path to save the screenshot.
+
         """
         await self._display.save_screenshot(path)
 
     # ==================== Video Streaming ====================
 
     async def get_next_video_chunk(self, timeout: float = 1.0) -> Any:
-        """
-        Wait for and return the next video chunk.
+        """Wait for and return the next video chunk.
 
         This is the primary method for real-time video streaming consumers.
         Chunks are fragmented MP4 data that can be fed to a media source.
@@ -579,12 +572,12 @@ class RDPClient:
             ...         chunk = await client.get_next_video_chunk()
             ...         if chunk:
             ...             websocket.send(chunk.data)
+
         """
         return await self._display.get_next_video_chunk(timeout)
 
     def get_pipeline_stats(self) -> Any:
-        """
-        Get detailed pipeline statistics including latency measurements.
+        """Get detailed pipeline statistics including latency measurements.
 
         Returns:
             PipelineStats dataclass with timing and counter information including:
@@ -598,13 +591,13 @@ class RDPClient:
             >>> stats = client.get_pipeline_stats()
             >>> print(f"E2E latency: {stats.total_e2e_estimate_ms:.1f}ms")
             >>> print(f"Consumer lag: {stats.consumer_lag_chunks} chunks")
+
         """
         return self._display.get_pipeline_stats()
 
     @staticmethod
     def transcode(input_path: str, output_path: str) -> bool:
-        """
-        Transcode a video file to another format.
+        """Transcode a video file to another format.
 
         Useful for converting MPEG-TS (.ts) recordings to MP4 or other formats.
         Uses ffmpeg with stream copy (no re-encoding) for fast conversion.
@@ -619,6 +612,7 @@ class RDPClient:
         Example:
             >>> RDPClient.transcode("session.ts", "session.mp4")
             True
+
         """
         import subprocess
 
@@ -652,8 +646,7 @@ class RDPClient:
         key: str | int,
         mode: str = "press",
     ) -> None:
-        """
-        Send a keyboard key event.
+        """Send a keyboard key event.
 
         Args:
             key: Either a named key string, a single character, or a scancode integer.
@@ -688,6 +681,7 @@ class RDPClient:
 
             # Use scancode directly
             await client.send_key(0x1C)  # Enter key
+
         """
         if mode not in ("press", "hold", "release"):
             raise ValueError(f"Invalid mode: {mode!r}. Must be 'press', 'hold', or 'release'.")
@@ -710,7 +704,7 @@ class RDPClient:
             else:
                 raise ValueError(
                     f"Unknown key name: {key!r}. Use a single character or one of: "
-                    f"{', '.join(sorted(set(KEY_MAP.keys())))}"
+                    f"{', '.join(sorted(set(KEY_MAP.keys())))}",
                 )
 
         is_press = mode in ("press", "hold")
@@ -729,7 +723,7 @@ class RDPClient:
                         event_time,
                         INPUT_EVENT_SCANCODE,
                         build_scancode_event(actual_scancode, is_release=False, is_extended=is_extended),
-                    )
+                    ),
                 )
             if is_release:
                 events.append(
@@ -737,7 +731,7 @@ class RDPClient:
                         event_time,
                         INPUT_EVENT_SCANCODE,
                         build_scancode_event(actual_scancode, is_release=True, is_extended=is_extended),
-                    )
+                    ),
                 )
         else:
             # Send as unicode event (single character)
@@ -765,7 +759,7 @@ class RDPClient:
                         release_time,
                         INPUT_EVENT_SCANCODE,
                         build_scancode_event(release_scancode, is_release=True, is_extended=release_extended),
-                    )
+                    ),
                 ]
                 with contextlib.suppress(Exception):
                     await self._send_input_events(release_event)
@@ -773,25 +767,25 @@ class RDPClient:
             asyncio.create_task(auto_release())
 
     async def send_text(self, text: str) -> None:
-        """
-        Send a text string as keyboard input.
+        """Send a text string as keyboard input.
 
         Each character is sent as a unicode key event (press + release).
         For special keys like Enter or Tab, use send_key() instead.
 
         Args:
             text: The text to type.
+
         """
         for char in text:
             await self.send_key(char)
 
     async def mouse_move(self, x: int, y: int) -> None:
-        """
-        Move the mouse to a position.
+        """Move the mouse to a position.
 
         Args:
             x: X coordinate.
             y: Y coordinate.
+
         """
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         event_data = build_mouse_event(x, y, button=0, is_move=True)
@@ -807,14 +801,14 @@ class RDPClient:
         button: int = 1,
         double_click: bool = False,
     ) -> None:
-        """
-        Click the mouse at a position.
+        """Click the mouse at a position.
 
         Args:
             x: X coordinate.
             y: Y coordinate.
             button: Button number (1=left, 2=right, 3=middle).
             double_click: Whether to double-click.
+
         """
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         events = []
@@ -824,21 +818,21 @@ class RDPClient:
 
         # Click down
         events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False)),
         )
 
         # Click up
         events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False)),
         )
 
         if double_click:
             # Second click
             events.append(
-                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False))
+                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False)),
             )
             events.append(
-                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False))
+                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False)),
             )
 
         await self._send_input_events(events)
@@ -847,18 +841,18 @@ class RDPClient:
         self._display.update_pointer(x=x, y=y)
 
     async def mouse_button_down(self, x: int, y: int, button: int | str = 1) -> None:
-        """
-        Press a mouse button down at a position.
+        """Press a mouse button down at a position.
 
         Args:
             x: X coordinate.
             y: Y coordinate.
             button: Button number (1=left, 2=right, 3=middle) or name ('left', 'right', 'middle').
+
         """
         button_num = self._normalize_button(button)
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         events = [
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=True, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=True, is_move=False)),
         ]
         await self._send_input_events(events)
 
@@ -866,18 +860,18 @@ class RDPClient:
         self._display.update_pointer(x=x, y=y)
 
     async def mouse_button_up(self, x: int, y: int, button: int | str = 1) -> None:
-        """
-        Release a mouse button at a position.
+        """Release a mouse button at a position.
 
         Args:
             x: X coordinate.
             y: Y coordinate.
             button: Button number (1=left, 2=right, 3=middle) or name ('left', 'right', 'middle').
+
         """
         button_num = self._normalize_button(button)
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         events = [
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=False, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button_num, is_down=False, is_move=False)),
         ]
         await self._send_input_events(events)
 
@@ -885,13 +879,13 @@ class RDPClient:
         self._display.update_pointer(x=x, y=y)
 
     async def mouse_wheel(self, x: int, y: int, delta: int) -> None:
-        """
-        Scroll the mouse wheel at a position.
+        """Scroll the mouse wheel at a position.
 
         Args:
             x: X coordinate.
             y: Y coordinate.
             delta: Wheel delta (positive=up, negative=down). Standard is +/-120 per notch.
+
         """
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         event_data = build_mouse_event(x, y, button=0, is_move=False, wheel_delta=delta)
@@ -907,13 +901,13 @@ class RDPClient:
         return button
 
     async def mouse_drag(self, x1: int, y1: int, x2: int, y2: int, button: int = 1) -> None:
-        """
-        Drag the mouse from one position to another.
+        """Drag the mouse from one position to another.
 
         Args:
             x1, y1: Starting position.
             x2, y2: Ending position.
             button: Button to hold during drag.
+
         """
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
         events = []
@@ -923,7 +917,7 @@ class RDPClient:
 
         # Button down
         events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x1, y1, button=button, is_down=True, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x1, y1, button=button, is_down=True, is_move=False)),
         )
 
         # Move to end position
@@ -931,7 +925,7 @@ class RDPClient:
 
         # Button up
         events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x2, y2, button=button, is_down=False, is_move=False))
+            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x2, y2, button=button, is_down=False, is_move=False)),
         )
 
         await self._send_input_events(events)
@@ -1245,8 +1239,7 @@ class RDPClient:
                         if error_code == 0x07:  # STATUS_VALID_CLIENT
                             logger.info("Licensing completed (valid client)")
                             break
-                        else:
-                            logger.debug(f"License error code: {error_code:#x}")
+                        logger.debug(f"License error code: {error_code:#x}")
                     continue
             else:
                 # Non-licensing PDU, save for later processing
@@ -1269,9 +1262,9 @@ class RDPClient:
         if len(pdu_data) < 6:
             raise ConnectionError("Invalid Demand Active PDU")
 
-        _total_length = struct.unpack("<H", pdu_data[0:2])[0]  # noqa: F841
+        _total_length = struct.unpack("<H", pdu_data[0:2])[0]
         pdu_type = struct.unpack("<H", pdu_data[2:4])[0]
-        _pdu_source = struct.unpack("<H", pdu_data[4:6])[0]  # noqa: F841
+        _pdu_source = struct.unpack("<H", pdu_data[4:6])[0]
 
         if (pdu_type & 0x000F) != PDUTYPE_DEMANDACTIVEPDU:
             raise ConnectionError(f"Expected Demand Active PDU, got type {pdu_type:#x}")
@@ -1341,8 +1334,7 @@ class RDPClient:
         logger.info("Connection finalization completed")
 
     async def _request_screen_refresh(self) -> None:
-        """
-        Request the server to send the current screen content.
+        """Request the server to send the current screen content.
 
         This sends both a Suppress Output PDU (to enable display updates)
         and a Refresh Rect PDU (to request the full screen).
@@ -1491,7 +1483,9 @@ class RDPClient:
                 self._fragment_buffer.extend(update_data)
                 logger.debug(f"Fragment LAST: size={len(update_data)}, total={len(self._fragment_buffer)}")
                 await self._process_fast_path_update(
-                    self._fragment_type, bytes(self._fragment_buffer), compression_flags
+                    self._fragment_type,
+                    bytes(self._fragment_buffer),
+                    compression_flags,
                 )
                 self._fragment_buffer = bytearray()
 
@@ -1622,13 +1616,18 @@ class RDPClient:
                 # Update display (image change bypasses rate limiting)
                 self._display.update_pointer(image=pointer_img, hotspot=(hotspot_x, hotspot_y), visible=True)
                 logger.debug(
-                    f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}"
+                    f"New pointer: {width}x{height} bpp={bpp} hotspot=({hotspot_x},{hotspot_y}) cache={cache_index}",
                 )
         except Exception as e:
             logger.debug(f"Failed to decode pointer: {e}")
 
     def _decode_pointer_image(
-        self, width: int, height: int, bpp: int, xor_data: bytes, and_data: bytes
+        self,
+        width: int,
+        height: int,
+        bpp: int,
+        xor_data: bytes,
+        and_data: bytes,
     ) -> Image.Image | None:
         """Decode pointer bitmap data into an RGBA image."""
         if width == 0 or height == 0:
@@ -1704,7 +1703,7 @@ class RDPClient:
             return
 
         # Share data header
-        _share_id = struct.unpack("<I", data[0:4])[0]  # noqa: F841
+        _share_id = struct.unpack("<I", data[0:4])[0]
         pdu_type2 = data[8]
 
         pdu_content = data[12:]
@@ -1760,7 +1759,7 @@ class RDPClient:
             f"📥 RDP Bitmaps: {updates_per_sec:.1f} updates/sec | "
             f"avg_update={avg_update_ms:.1f}ms | "
             f"avg_rle={avg_rle_ms:.1f}ms | "
-            f"count={self._bitmap_update_count}"
+            f"count={self._bitmap_update_count}",
         )
 
         # Reset counters
@@ -1786,7 +1785,13 @@ class RDPClient:
                 rle_start = time.perf_counter()
                 loop = asyncio.get_running_loop()
                 data = await loop.run_in_executor(
-                    None, decompress_rle, data, width, height, bpp, has_compression_header
+                    None,
+                    decompress_rle,
+                    data,
+                    width,
+                    height,
+                    bpp,
+                    has_compression_header,
                 )
                 self._rle_decompress_time_total += time.perf_counter() - rle_start
             except Exception as e:
@@ -1828,8 +1833,7 @@ class RDPClient:
         return bytes(header) + data
 
     def _extract_pdu_from_mcs(self, data: bytes) -> bytes:
-        """
-        Extract PDU data from MCS Send Data Indication.
+        """Extract PDU data from MCS Send Data Indication.
 
         Format:
         - Byte 0: Type (0x68 for Send Data Indication)
@@ -1871,8 +1875,7 @@ class RDPClient:
         await self._writer.drain()
 
     async def _recv_x224_data(self) -> bytes:
-        """
-        Receive data packet (either TPKT/X.224 or Fast-Path).
+        """Receive data packet (either TPKT/X.224 or Fast-Path).
 
         Returns the payload data (without transport headers).
         """
@@ -1892,47 +1895,46 @@ class RDPClient:
             if len(data) >= 3 and data[0] == 0x02:
                 return data[3:]
             return data
+        # Fast-Path: first byte is fpOutputHeader
+        fp_header = first_byte[0]
+        action = fp_header & 0x03
+        flags = (fp_header >> 6) & 0x03
+
+        if action != 0:
+            # Not a fast-path PDU, might be some other format
+            logger.debug(f"Unknown packet format, first byte: {first_byte[0]:#x}")
+            return b""
+
+        # Read length1
+        length1 = await self._reader.readexactly(1)
+        if length1[0] & 0x80:
+            # 2-byte length: ((length1 & 0x7F) << 8) | length2
+            length2 = await self._reader.readexactly(1)
+            pdu_length = ((length1[0] & 0x7F) << 8) | length2[0]
+            header_size = 3  # fpOutputHeader + length1 + length2
         else:
-            # Fast-Path: first byte is fpOutputHeader
-            fp_header = first_byte[0]
-            action = fp_header & 0x03
-            flags = (fp_header >> 6) & 0x03
+            # 1-byte length
+            pdu_length = length1[0]
+            header_size = 2  # fpOutputHeader + length1
 
-            if action != 0:
-                # Not a fast-path PDU, might be some other format
-                logger.debug(f"Unknown packet format, first byte: {first_byte[0]:#x}")
-                return b""
+        # Read remaining data (pdu_length includes header)
+        remaining = pdu_length - header_size
+        if remaining <= 0:
+            return b""
 
-            # Read length1
-            length1 = await self._reader.readexactly(1)
-            if length1[0] & 0x80:
-                # 2-byte length: ((length1 & 0x7F) << 8) | length2
-                length2 = await self._reader.readexactly(1)
-                pdu_length = ((length1[0] & 0x7F) << 8) | length2[0]
-                header_size = 3  # fpOutputHeader + length1 + length2
+        data = await self._reader.readexactly(remaining)
+
+        # Check for encryption (flags & 0x02 = FASTPATH_OUTPUT_ENCRYPTED)
+        if flags & 0x02:
+            # Encrypted Fast-Path - skip 8-byte signature (we're using TLS, so this shouldn't happen)
+            if len(data) >= 8:
+                data = data[8:]
             else:
-                # 1-byte length
-                pdu_length = length1[0]
-                header_size = 2  # fpOutputHeader + length1
-
-            # Read remaining data (pdu_length includes header)
-            remaining = pdu_length - header_size
-            if remaining <= 0:
                 return b""
 
-            data = await self._reader.readexactly(remaining)
-
-            # Check for encryption (flags & 0x02 = FASTPATH_OUTPUT_ENCRYPTED)
-            if flags & 0x02:
-                # Encrypted Fast-Path - skip 8-byte signature (we're using TLS, so this shouldn't happen)
-                if len(data) >= 8:
-                    data = data[8:]
-                else:
-                    return b""
-
-            # Return the Fast-Path updates as-is for processing
-            # We'll wrap it in a marker so the processing code knows it's Fast-Path
-            return b"\xff\x46" + data  # Custom marker for Fast-Path (0xFF 0x46 = 'F')
+        # Return the Fast-Path updates as-is for processing
+        # We'll wrap it in a marker so the processing code knows it's Fast-Path
+        return b"\xff\x46" + data  # Custom marker for Fast-Path (0xFF 0x46 = 'F')
 
     async def _send_mcs_data(self, data: bytes, channel_id: int) -> None:
         """Send data via MCS Send Data Request."""
@@ -1973,14 +1975,12 @@ class RDPClient:
 
         if length_bytes == 0:
             return header + content
-        elif length_bytes == 1:
+        if length_bytes == 1:
             return header + bytes([total_length]) + content
-        else:
-            return header + bytes([(total_length >> 8) & 0xFF, total_length & 0xFF]) + content
+        return header + bytes([(total_length >> 8) & 0xFF, total_length & 0xFF]) + content
 
     def _extract_public_key_from_cert(self, cert_der: bytes) -> bytes:
-        """
-        Extract the raw public key from a DER-encoded certificate.
+        """Extract the raw public key from a DER-encoded certificate.
 
         For CredSSP, we need just the RSA public key content, not the
         full SubjectPublicKeyInfo structure.
