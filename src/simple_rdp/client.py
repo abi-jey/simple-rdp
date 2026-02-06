@@ -72,6 +72,115 @@ logger = getLogger(__name__)
 IO_CHANNEL_ID = 1003
 MCS_GLOBAL_CHANNEL_ID = 1003
 
+# Keyboard scancode mapping for named keys
+# See: https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-studio-6.0/aa299374(v=vs.60)
+KEY_MAP: dict[str, int] = {
+    # Escape and function keys
+    "escape": 0x01,
+    "esc": 0x01,
+    "f1": 0x3B,
+    "f2": 0x3C,
+    "f3": 0x3D,
+    "f4": 0x3E,
+    "f5": 0x3F,
+    "f6": 0x40,
+    "f7": 0x41,
+    "f8": 0x42,
+    "f9": 0x43,
+    "f10": 0x44,
+    "f11": 0x57,
+    "f12": 0x58,
+    # Number row
+    "1": 0x02,
+    "2": 0x03,
+    "3": 0x04,
+    "4": 0x05,
+    "5": 0x06,
+    "6": 0x07,
+    "7": 0x08,
+    "8": 0x09,
+    "9": 0x0A,
+    "0": 0x0B,
+    "minus": 0x0C,
+    "equals": 0x0D,
+    "backspace": 0x0E,
+    "bs": 0x0E,
+    # First letter row
+    "tab": 0x0F,
+    "q": 0x10,
+    "w": 0x11,
+    "e": 0x12,
+    "r": 0x13,
+    "t": 0x14,
+    "y": 0x15,
+    "u": 0x16,
+    "i": 0x17,
+    "o": 0x18,
+    "p": 0x19,
+    # Second letter row
+    "capslock": 0x3A,
+    "caps": 0x3A,
+    "a": 0x1E,
+    "s": 0x1F,
+    "d": 0x20,
+    "f": 0x21,
+    "g": 0x22,
+    "h": 0x23,
+    "j": 0x24,
+    "k": 0x25,
+    "l": 0x26,
+    "enter": 0x1C,
+    "return": 0x1C,
+    # Third letter row
+    "shift": 0x2A,
+    "lshift": 0x2A,
+    "z": 0x2C,
+    "x": 0x2D,
+    "c": 0x2E,
+    "v": 0x2F,
+    "b": 0x30,
+    "n": 0x31,
+    "m": 0x32,
+    "rshift": 0x36,
+    # Bottom row
+    "ctrl": 0x1D,
+    "lctrl": 0x1D,
+    "alt": 0x38,
+    "lalt": 0x38,
+    "space": 0x39,
+    "ralt": 0xE038,
+    "rctrl": 0xE01D,
+    # Navigation keys
+    "insert": 0x52,
+    "ins": 0x52,
+    "delete": 0x53,
+    "del": 0x53,
+    "home": 0x47,
+    "end": 0x4F,
+    "pageup": 0x49,
+    "pgup": 0x49,
+    "pagedown": 0x51,
+    "pgdn": 0x51,
+    # Arrow keys
+    "up": 0x48,
+    "down": 0x50,
+    "left": 0x4B,
+    "right": 0x4D,
+    # Lock keys
+    "numlock": 0x45,
+    "scrolllock": 0x46,
+    # Windows/system keys
+    "win": 0xE05B,
+    "lwin": 0xE05B,
+    "rwin": 0xE05C,
+    "apps": 0xE05D,
+    "menu": 0xE05D,
+    # Other
+    "printscreen": 0xE037,
+    "prtsc": 0xE037,
+    "pause": 0xE11D,
+}
+
 
 class RDPClient:
     """
@@ -541,46 +650,114 @@ class RDPClient:
     async def send_key(
         self,
         key: str | int,
-        is_press: bool = True,
-        is_release: bool = True,
+        mode: str = "press",
     ) -> None:
         """
         Send a keyboard key event.
 
         Args:
-            key: Either a character string or a scan code integer.
-            is_press: Whether to send key press event.
-            is_release: Whether to send key release event.
+            key: Either a named key string, a single character, or a scancode integer.
+                Named keys (case-insensitive):
+                - Letters: "a"-"z"
+                - Numbers: "0"-"9"
+                - Function keys: "f1"-"f12"
+                - Modifiers: "shift", "ctrl", "alt", "win" (also "lshift", "rshift", etc.)
+                - Navigation: "up", "down", "left", "right", "home", "end", "pageup", "pagedown"
+                - Editing: "enter", "backspace", "tab", "delete", "insert", "space"
+                - System: "escape", "printscreen", "pause", "capslock", "numlock"
+                If a single character is not found in KEY_MAP, it's sent as a unicode event.
+            mode: How to send the key:
+                - "press" (default): Send key press then release (single keystroke).
+                - "hold": Send only key press. Creates a background task that auto-releases
+                  after 10 seconds as a safety measure. Use this for modifier keys when
+                  building key combinations manually.
+
+        Raises:
+            ValueError: If mode is not "press" or "hold".
+            ValueError: If key is a named key that doesn't exist in KEY_MAP.
+
+        Examples:
+            # Type a single key
+            await client.send_key("enter")
+            await client.send_key("a")
+
+            # Hold shift while pressing 'a' (types 'A')
+            await client.send_key("shift", mode="hold")
+            await client.send_key("a")
+            await client.send_key("shift", mode="release")
+
+            # Use scancode directly
+            await client.send_key(0x1C)  # Enter key
         """
+        if mode not in ("press", "hold", "release"):
+            raise ValueError(f"Invalid mode: {mode!r}. Must be 'press', 'hold', or 'release'.")
+
         events = []
         event_time = int(time.time() * 1000) & 0xFFFFFFFF
 
-        if isinstance(key, str):
-            # Send as unicode events
-            for char in key:
-                code = ord(char)
-                if is_press:
-                    events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=False)))
-                if is_release:
-                    events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=True)))
-        else:
-            # Send as scancode
+        # Determine if this is a named key, unicode character, or raw scancode
+        scancode: int | None = None
+        if isinstance(key, int):
+            scancode = key
+        elif isinstance(key, str):
+            # Check if it's a named key in KEY_MAP
+            key_lower = key.lower()
+            if key_lower in KEY_MAP:
+                scancode = KEY_MAP[key_lower]
+            elif len(key) == 1:
+                # Single character - send as unicode
+                pass
+            else:
+                raise ValueError(
+                    f"Unknown key name: {key!r}. Use a single character or one of: "
+                    f"{', '.join(sorted(set(KEY_MAP.keys())))}"
+                )
+
+        is_press = mode in ("press", "hold")
+        is_release = mode in ("press", "release")
+
+        if scancode is not None:
+            # Send as scancode event
             if is_press:
-                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(key, is_release=False)))
+                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=False)))
             if is_release:
-                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(key, is_release=True)))
+                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=True)))
+        else:
+            # Send as unicode event (single character)
+            assert isinstance(key, str) and len(key) == 1
+            code = ord(key)
+            if is_press:
+                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=False)))
+            if is_release:
+                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=True)))
 
         if events:
             await self._send_input_events(events)
+
+        # For hold mode, schedule auto-release after 10 seconds as safety measure
+        if mode == "hold" and scancode is not None:
+
+            async def auto_release() -> None:
+                await asyncio.sleep(10)
+                release_time = int(time.time() * 1000) & 0xFFFFFFFF
+                release_event = [(release_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=True))]
+                with contextlib.suppress(Exception):
+                    await self._send_input_events(release_event)
+
+            asyncio.create_task(auto_release())
 
     async def send_text(self, text: str) -> None:
         """
         Send a text string as keyboard input.
 
+        Each character is sent as a unicode key event (press + release).
+        For special keys like Enter or Tab, use send_key() instead.
+
         Args:
             text: The text to type.
         """
-        await self.send_key(text)
+        for char in text:
+            await self.send_key(char)
 
     async def mouse_move(self, x: int, y: int) -> None:
         """
