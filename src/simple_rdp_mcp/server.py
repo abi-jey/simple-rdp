@@ -636,15 +636,15 @@ async def send_key(
             for mod in modifiers:
                 mod_scancode = MODIFIER_MAP.get(mod.lower())
                 if mod_scancode:
-                    await client.send_key(mod_scancode, is_press=True, is_release=False)
+                    await client.send_key(mod_scancode, mode="hold")
 
-        await client.send_key(key, is_press=True, is_release=True)
+        await client.send_key(key, mode="press")
 
         if modifiers:
             for mod in reversed(modifiers):
                 mod_scancode = MODIFIER_MAP.get(mod.lower())
                 if mod_scancode:
-                    await client.send_key(mod_scancode, is_press=False, is_release=True)
+                    await client.send_key(mod_scancode, mode="release")
 
         return {"action": "key", "key": key, "modifiers": modifiers}
     else:
@@ -655,17 +655,17 @@ async def send_key(
         for mod in modifiers:
             mod_scancode = MODIFIER_MAP.get(mod.lower())
             if mod_scancode:
-                await client.send_key(mod_scancode, is_press=True, is_release=False)
+                await client.send_key(mod_scancode, mode="hold")
 
     # Send the key
-    await client.send_key(scancode, is_press=True, is_release=True)
+    await client.send_key(scancode, mode="press")
 
     # Release modifiers
     if modifiers:
         for mod in reversed(modifiers):
             mod_scancode = MODIFIER_MAP.get(mod.lower())
             if mod_scancode:
-                await client.send_key(mod_scancode, is_press=False, is_release=True)
+                await client.send_key(mod_scancode, mode="release")
 
     return {"action": "key", "key": key, "modifiers": modifiers}
 

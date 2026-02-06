@@ -150,22 +150,22 @@ KEY_MAP: dict[str, int] = {
     "space": 0x39,
     "ralt": 0xE038,
     "rctrl": 0xE01D,
-    # Navigation keys
-    "insert": 0x52,
-    "ins": 0x52,
-    "delete": 0x53,
-    "del": 0x53,
-    "home": 0x47,
-    "end": 0x4F,
-    "pageup": 0x49,
-    "pgup": 0x49,
-    "pagedown": 0x51,
-    "pgdn": 0x51,
-    # Arrow keys
-    "up": 0x48,
-    "down": 0x50,
-    "left": 0x4B,
-    "right": 0x4D,
+    # Navigation keys (extended - require 0xE0 prefix)
+    "insert": 0xE052,
+    "ins": 0xE052,
+    "delete": 0xE053,
+    "del": 0xE053,
+    "home": 0xE047,
+    "end": 0xE04F,
+    "pageup": 0xE049,
+    "pgup": 0xE049,
+    "pagedown": 0xE051,
+    "pgdn": 0xE051,
+    # Arrow keys (extended - require 0xE0 prefix)
+    "up": 0xE048,
+    "down": 0xE050,
+    "left": 0xE04B,
+    "right": 0xE04D,
     # Lock keys
     "numlock": 0x45,
     "scrolllock": 0x46,
@@ -717,11 +717,28 @@ class RDPClient:
         is_release = mode in ("press", "release")
 
         if scancode is not None:
+            # Check if this is an extended scancode (0xE0 prefix)
+            # Extended keys have their scancode in the form 0xE0XX
+            is_extended = (scancode & 0xFF00) == 0xE000
+            actual_scancode = scancode & 0xFF if is_extended else scancode
+
             # Send as scancode event
             if is_press:
-                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=False)))
+                events.append(
+                    (
+                        event_time,
+                        INPUT_EVENT_SCANCODE,
+                        build_scancode_event(actual_scancode, is_release=False, is_extended=is_extended),
+                    )
+                )
             if is_release:
-                events.append((event_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=True)))
+                events.append(
+                    (
+                        event_time,
+                        INPUT_EVENT_SCANCODE,
+                        build_scancode_event(actual_scancode, is_release=True, is_extended=is_extended),
+                    )
+                )
         else:
             # Send as unicode event (single character)
             assert isinstance(key, str) and len(key) == 1
@@ -736,11 +753,20 @@ class RDPClient:
 
         # For hold mode, schedule auto-release after 10 seconds as safety measure
         if mode == "hold" and scancode is not None:
+            # Capture values for the closure
+            release_scancode = scancode & 0xFF if (scancode & 0xFF00) == 0xE000 else scancode
+            release_extended = (scancode & 0xFF00) == 0xE000
 
             async def auto_release() -> None:
                 await asyncio.sleep(10)
                 release_time = int(time.time() * 1000) & 0xFFFFFFFF
-                release_event = [(release_time, INPUT_EVENT_SCANCODE, build_scancode_event(scancode, is_release=True))]
+                release_event = [
+                    (
+                        release_time,
+                        INPUT_EVENT_SCANCODE,
+                        build_scancode_event(release_scancode, is_release=True, is_extended=release_extended),
+                    )
+                ]
                 with contextlib.suppress(Exception):
                     await self._send_input_events(release_event)
 
