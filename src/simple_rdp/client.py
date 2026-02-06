@@ -409,7 +409,7 @@ class RDPClient:
         """
         return await self._display.screenshot()
 
-    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int]]:
+    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
         """
         Capture a cropped area around the pointer position.
 
@@ -418,9 +418,10 @@ class RDPClient:
         near edges, the crop is clamped to stay within display bounds.
 
         Returns:
-            Tuple of (cropped_image, (top_x, top_y)) where:
+            Tuple of (cropped_image, (top_x, top_y), (bottom_x, bottom_y)) where:
             - cropped_image: Cropped region with pointer composited
             - (top_x, top_y): Top-left corner position of crop relative to display
+            - (bottom_x, bottom_y): Bottom-right corner position of crop relative to display
         """
         return await self._display.pointer_area_screenshot()
 

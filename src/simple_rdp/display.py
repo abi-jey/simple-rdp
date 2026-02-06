@@ -528,7 +528,7 @@ class Display:
         img.save(path)
         logger.info(f"Screenshot saved to {path}")
 
-    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int]]:
+    async def pointer_area_screenshot(self) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
         """
         Capture a cropped area around the pointer position.
 
@@ -537,15 +537,16 @@ class Display:
         near edges, the crop is clamped to stay within display bounds.
 
         Returns:
-            Tuple of (cropped_image, (top_x, top_y)) where:
+            Tuple of (cropped_image, (top_x, top_y), (bottom_x, bottom_y)) where:
             - cropped_image: Cropped region with pointer composited
             - (top_x, top_y): Top-left corner position of crop relative to display
+            - (bottom_x, bottom_y): Bottom-right corner position of crop relative to display
         """
         async with self._screen_lock:
             if self._raw_display_image is None:
                 crop_w = self._width // 3
                 crop_h = self._height // 3
-                return (Image.new("RGB", (crop_w, crop_h), (0, 0, 0)), (0, 0))
+                return (Image.new("RGB", (crop_w, crop_h), (0, 0, 0)), (0, 0), (crop_w, crop_h))
 
             # Update final display image if dirty
             if self._final_display_image_dirty or self._final_display_image is None:
@@ -565,10 +566,14 @@ class Display:
             top_x = max(0, min(top_x, self._width - crop_w))
             top_y = max(0, min(top_y, self._height - crop_h))
 
-            # Crop the image
-            cropped = self._final_display_image.crop((top_x, top_y, top_x + crop_w, top_y + crop_h))
+            # Calculate bottom-right corner
+            bottom_x = top_x + crop_w
+            bottom_y = top_y + crop_h
 
-            return (cropped.copy(), (top_x, top_y))
+            # Crop the image
+            cropped = self._final_display_image.crop((top_x, top_y, bottom_x, bottom_y))
+
+            return (cropped.copy(), (top_x, top_y), (bottom_x, bottom_y))
 
     async def apply_bitmap(
         self,
