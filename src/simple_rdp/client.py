@@ -826,32 +826,45 @@ class RDPClient:
             double_click: Whether to double-click.
 
         """
-        event_time = int(time.time() * 1000) & 0xFFFFFFFF
-        events = []
-
         # Move to position
-        events.append((event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=0, is_move=True)))
-
-        # Click down
-        events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False)),
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        await self._send_input_events(
+            [(event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=0, is_move=True))]
         )
 
-        # Click up
-        events.append(
-            (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False)),
+        # First click down
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        await self._send_input_events(
+            [(event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False))]
+        )
+
+        # Delay between press and release
+        await asyncio.sleep(0.05)
+
+        # First click up
+        event_time = int(time.time() * 1000) & 0xFFFFFFFF
+        await self._send_input_events(
+            [(event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False))]
         )
 
         if double_click:
-            # Second click
-            events.append(
-                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False)),
-            )
-            events.append(
-                (event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False)),
+            # Delay between first and second click
+            await asyncio.sleep(0.1)
+
+            # Second click down
+            event_time = int(time.time() * 1000) & 0xFFFFFFFF
+            await self._send_input_events(
+                [(event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=True, is_move=False))]
             )
 
-        await self._send_input_events(events)
+            # Delay between press and release
+            await asyncio.sleep(0.05)
+
+            # Second click up
+            event_time = int(time.time() * 1000) & 0xFFFFFFFF
+            await self._send_input_events(
+                [(event_time, INPUT_EVENT_MOUSE, build_mouse_event(x, y, button=button, is_down=False, is_move=False))]
+            )
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
