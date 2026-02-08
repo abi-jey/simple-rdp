@@ -11,19 +11,14 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Union
 
-from google.adk.agents import LlmAgent
-from google.adk.agents.run_config import RunConfig
-from google.adk.events.event import Event
-from google.adk.events.event_actions import EventActions
-from google.adk.events.event_actions import EventCompaction
-from google.adk.models.base_llm import BaseLlm
-from google.adk.runners import Runner
-from google.adk.sessions import Session
-from google.adk.sessions.base_session_service import BaseSessionService
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
-from google.genai.types import Content
-from google.genai.types import FinishReason
-from google.genai.types import Part
+if TYPE_CHECKING:
+    from google.adk.agents.run_config import RunConfig
+    from google.adk.events.event import Event
+    from google.adk.models.base_llm import BaseLlm
+    from google.adk.runners import Runner
+    from google.adk.sessions import Session
+    from google.adk.sessions.base_session_service import BaseSessionService
+    from google.genai.types import Content
 
 logger = getLogger(__name__)
 
@@ -69,9 +64,12 @@ def _generate_summary_in_process(prompt: str, model_config: dict[str, Any]) -> s
 
     async def _async_generate_summary() -> str:
         # Import inside function to ensure clean process state
+        from google.adk.agents import LlmAgent
         from google.adk.models.lite_llm import LiteLlm
         from google.adk.runners import Runner
+        from google.adk.sessions.in_memory_session_service import InMemorySessionService
         from google.genai.types import Content
+        from google.genai.types import FinishReason
         from google.genai.types import Part
 
         # Reconstruct the model from config
@@ -130,9 +128,11 @@ def _process_target(prompt: str, model_config: dict[str, Any], result_queue: "mu
 
 
 if TYPE_CHECKING:
+    from google.genai.types import Part
+
     from simple_rdp import RDPClient
 # Type alias for async tool functions with varying signatures
-AgenticTool = Callable[..., Coroutine[object, object, list[Part] | str]]
+AgenticTool = Callable[..., Coroutine[object, object, list["Part"] | str]]
 
 
 def wrap_client_methods_for_google_adk(client: "RDPClient", log_reasoning: bool = False) -> list[AgenticTool]:
@@ -143,9 +143,11 @@ def wrap_client_methods_for_google_adk(client: "RDPClient", log_reasoning: bool 
     Each tool is a wrapper around an RDPClient method, allowing it to be called by the agent.
     The tools are designed to be compatible with Google ADK's expectations for tool interfaces.
     """
+    from google.genai.types import Part
+
     tools: list[AgenticTool] = []
 
-    async def screenshot() -> list[Part]:
+    async def screenshot() -> list["Part"]:
         """Get a screenshot of the display"""
         img_pil = await client.screenshot()
         img_bytes = BytesIO()
@@ -316,6 +318,8 @@ class AdkExternalCompaction:
         run_config: Union["RunConfig", None] = None,
     ):
         """Wraps original run_async to insert and restart runner on compaction triggers"""
+        from google.genai.types import Content
+        from google.genai.types import Part
 
         self.session_id = session_id
         self.user_id = user_id
@@ -352,6 +356,12 @@ class AdkExternalCompaction:
             await self.session_service.append_event(session=session, event=compaction_event)
 
     async def commpact_events(self, session: "Session") -> "Event":
+        from google.adk.events.event import Event
+        from google.adk.events.event_actions import EventActions
+        from google.adk.events.event_actions import EventCompaction
+        from google.genai.types import Content
+        from google.genai.types import Part
+
         events = session.events
         # Run the process-based summary generation in a thread to avoid blocking the event loop
         # The actual LLM call happens in a completely separate process

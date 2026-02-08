@@ -16,8 +16,6 @@ from typing import Self
 from PIL import Image
 
 from simple_rdp._rle import decompress_rle
-from simple_rdp.agentic_computer_use import AgenticTool
-from simple_rdp.agentic_computer_use import wrap_client_methods_for_google_adk
 from simple_rdp.capabilities import build_client_capabilities
 from simple_rdp.credssp import CredSSPAuth
 from simple_rdp.credssp import build_ts_request
@@ -2022,13 +2020,16 @@ class RDPClient:
         info = textwrap.dedent(info)
         return info.strip()
 
-    def get_agentic_tools(self, for_framework: str = "google-adk") -> list[AgenticTool]:
+    def get_agentic_tools(self, for_framework: str = "google-adk") -> list[Any]:
         """Get tools to expose to Agentic.
 
         These tools can be called by Agentic to perform actions on the RDP client,
         such as sending input events or requesting screen refreshes.
-        """
 
+        Requires the 'agentic' extra to be installed (pip install simple-rdp[agentic]).
+        """
         if for_framework == "google-adk":
-            return wrap_client_methods_for_google_adk(self)
+            from simple_rdp.agentic_computer_use import wrap_client_methods_for_google_adk
+
+            return wrap_client_methods_for_google_adk(self)  # type: ignore[no-any-return]
         raise ValueError(f"Unknown framework: {for_framework}")
