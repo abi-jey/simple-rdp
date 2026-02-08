@@ -49,6 +49,7 @@ from typing import IO
 from PIL import Image
 
 logger = getLogger(__name__)
+stat_logger = getLogger("simple_rdp.display.stats")
 
 
 def _create_default_pointer() -> Image.Image:
@@ -940,13 +941,21 @@ class Display:
         queue_size = self._video_queue.qsize()
         queue_pct = (queue_size / self._queue_size) * 100
 
-        logger.info(
+        stat_logger.info(
             f"Pipeline: {status} by {abs(headroom_ms):.1f}ms | "
             f"encode={avg_encode_ms:.1f}ms/frame | "
             f"queue={queue_size}/{self._queue_size} ({queue_pct:.0f}%) | "
             f"drops={self._stats['queue_drops']} | "
             f"fps_in={self._frames_since_diag / self._diag_interval:.1f}",
         )
+        if status == "BEHIND":
+            stat_logger.warning(
+                f"Pipeline: {status} by {abs(headroom_ms):.1f}ms | "
+                f"encode={avg_encode_ms:.1f}ms/frame | "
+                f"queue={queue_size}/{self._queue_size} ({queue_pct:.0f}%) | "
+                f"drops={self._stats['queue_drops']} | "
+                f"fps_in={self._frames_since_diag / self._diag_interval:.1f}",
+            )
 
         self._frames_since_diag = 0
         self._encode_time_total = 0.0

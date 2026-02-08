@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import ssl
 import struct
+import textwrap
 import time
 from asyncio import StreamReader
 from asyncio import StreamWriter
@@ -15,6 +16,8 @@ from typing import Self
 from PIL import Image
 
 from simple_rdp._rle import decompress_rle
+from simple_rdp.agentic_computer_use import AgenticTool
+from simple_rdp.agentic_computer_use import wrap_client_methods_for_google_adk
 from simple_rdp.capabilities import build_client_capabilities
 from simple_rdp.credssp import CredSSPAuth
 from simple_rdp.credssp import build_ts_request
@@ -65,7 +68,7 @@ from simple_rdp.pdu import parse_bitmap_update
 from simple_rdp.pdu import parse_demand_active_pdu
 
 logger = getLogger(__name__)
-
+stat_logger = getLogger("simple_rdp.stats")
 # Standard RDP channels
 IO_CHANNEL_ID = 1003
 MCS_GLOBAL_CHANNEL_ID = 1003
@@ -399,6 +402,7 @@ class RDPClient:
             ConnectionError: If connection cannot be established.
 
         """
+        logger.info(f"Connecting to RDP server at {self._host}:{self._port}...")
         # Phase 1: Connection Initiation
         await self._start_tcp_connection()
         await self._start_x224()
@@ -478,7 +482,10 @@ class RDPClient:
         if self._tcp_writer:
             self._tcp_writer.close()
             try:
-                await self._tcp_writer.wait_closed()
+                # Use timeout to avoid blocking on TCP close handshake with unresponsive server
+                await asyncio.wait_for(self._tcp_writer.wait_closed(), timeout=2.0)
+            except TimeoutError:
+                logger.debug("Timeout waiting for TCP writer to close (server unresponsive)")
             except Exception as e:
                 logger.debug(f"Error closing TCP writer (expected during shutdown): {e}")
         self._tcp_reader = None
@@ -766,18 +773,29 @@ class RDPClient:
 
             asyncio.create_task(auto_release())
 
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, chars_per_second: float = 10.0) -> None:
         """Send a text string as keyboard input.
 
-        Each character is sent as a unicode key event (press + release).
-        For special keys like Enter or Tab, use send_key() instead.
+        Each character is sent as a unicode key event (press + release) with a delay
+        between characters to simulate realistic typing speed. The method awaits until
+        all characters have been sent.
 
         Args:
             text: The text to type.
+            chars_per_second: Typing speed in characters per second. Default is 10.0,
+                meaning 100ms delay between each character.
 
         """
-        for char in text:
+        if not text:
+            return
+
+        delay = 1.0 / chars_per_second if chars_per_second > 0 else 0
+
+        for i, char in enumerate(text):
             await self.send_key(char)
+            # Add delay between characters (not after the last one)
+            if delay > 0 and i < len(text) - 1:
+                await asyncio.sleep(delay)
 
     async def mouse_move(self, x: int, y: int) -> None:
         """Move the mouse to a position.
@@ -1755,7 +1773,7 @@ class RDPClient:
         )
         updates_per_sec = self._bitmap_update_count / self._diag_interval
 
-        logger.info(
+        stat_logger.info(
             f"📥 RDP Bitmaps: {updates_per_sec:.1f} updates/sec | "
             f"avg_update={avg_update_ms:.1f}ms | "
             f"avg_rle={avg_rle_ms:.1f}ms | "
@@ -1993,3 +2011,24 @@ class RDPClient:
         if pubkey[0] == 0x00:
             pubkey = pubkey[1:]
         return bytes(pubkey)
+
+    async def get_computer_info(self) -> str:
+        """Get information about the connected computer."""
+        info = f"""
+        Connected Computer:
+        - Host: {self._host}
+        - Screen: {self._width}x{self._height}
+        """
+        info = textwrap.dedent(info)
+        return info.strip()
+
+    def get_agentic_tools(self, for_framework: str = "google-adk") -> list[AgenticTool]:
+        """Get tools to expose to Agentic.
+
+        These tools can be called by Agentic to perform actions on the RDP client,
+        such as sending input events or requesting screen refreshes.
+        """
+
+        if for_framework == "google-adk":
+            return wrap_client_methods_for_google_adk(self)
+        raise ValueError(f"Unknown framework: {for_framework}")
