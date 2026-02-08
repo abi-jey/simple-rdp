@@ -1,6 +1,6 @@
 [project]
 name = "simple-rdp"
-version = "0.8.6"
+version = "0.8.7"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 readme = "README.md"
 requires-python = ">=3.11, <3.15"
@@ -37,7 +37,7 @@ features = [ "pyo3/extension-module",]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-include = ["src/**/*.py", "examples/**/*.py", "tests/**/*.py"]
+include = [ "src/**/*.py", "examples/**/*.py", "tests/**/*.py",]
 
 [tool.mypy]
 python_version = "3.11"
@@ -53,7 +53,7 @@ ignore_missing_imports = true
 
 [tool.ruff.lint]
 select = [ "E", "F", "I", "UP", "B", "SIM",]
-fixable = ["ALL"]
+fixable = [ "ALL",]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -67,7 +67,6 @@ asyncio_mode = "auto"
 force-single-line = true
 case-sensitive = true
 
-
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
 mkdocs-material = "^9.7.1"
@@ -79,10 +78,13 @@ fastmcp = "^2.0.0"
 fastapi = "^0.128.0"
 maturin = ">=1.8.0"
 pre-commit = "^4.5.1"
-google-adk = {extras = ["extensions"], version = "^1.24.1"}
 langfuse = "^3.13.0"
 openinference-instrumentation-google-adk = "^0.1.9"
 
 [tool.poetry.group.docs.dependencies.mkdocstrings]
 extras = [ "python",]
 version = "^1.0.2"
+
+[tool.poetry.group.dev.dependencies.google-adk]
+extras = [ "extensions",]
+version = "^1.24.1"
