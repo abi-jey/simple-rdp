@@ -432,6 +432,119 @@ def build_mouse_event(
     return bytes(data)
 
 
+# Fast-path input event codes
+FASTPATH_INPUT_EVENT_SCANCODE = 0
+FASTPATH_INPUT_EVENT_MOUSE = 1
+FASTPATH_INPUT_EVENT_MOUSEX = 2
+FASTPATH_INPUT_EVENT_SYNC = 3
+FASTPATH_INPUT_EVENT_UNICODE = 4
+FASTPATH_INPUT_EVENT_MOUSEREL = 5
+
+
+def build_fast_path_mouse_event(
+    x: int,
+    y: int,
+    button: int = 0,  # 0=none, 1=left, 2=right, 3=middle
+    is_down: bool = False,
+    is_move: bool = True,
+    wheel_delta: int = 0,  # Positive=up, negative=down
+) -> bytes:
+    """Build a fast-path mouse event (TS_FP_POINTER_EVENT).
+
+    Returns 7 bytes: eventHeader(1) + pointerFlags(2) + xPos(2) + yPos(2)
+    """
+    # Build pointer flags (same as slow-path)
+    flags = 0
+
+    if is_move:
+        flags |= PTRFLAGS_MOVE
+
+    if button == 1:
+        flags |= PTRFLAGS_BUTTON1
+    elif button == 2:
+        flags |= PTRFLAGS_BUTTON2
+    elif button == 3:
+        flags |= PTRFLAGS_BUTTON3
+
+    if is_down and button > 0:
+        flags |= PTRFLAGS_DOWN
+
+    # Handle mouse wheel
+    if wheel_delta != 0:
+        flags |= PTRFLAGS_WHEEL
+        if wheel_delta < 0:
+            flags |= PTRFLAGS_WHEEL_NEGATIVE
+            wheel_delta = -wheel_delta
+        # Wheel delta is in the lower 9 bits (0-511), typically 120 per notch
+        flags |= wheel_delta & 0x01FF
+
+    # eventHeader: eventCode (3 bits) in high bits, eventFlags (5 bits) in low bits
+    # For mouse: eventCode = 1 (FASTPATH_INPUT_EVENT_MOUSE), eventFlags = 0
+    # Format: eventCode << 5 | eventFlags
+    event_header = (FASTPATH_INPUT_EVENT_MOUSE << 5) | 0
+
+    data = bytearray()
+    data += bytes([event_header])
+    data += struct.pack("<H", flags)
+    data += struct.pack("<H", x & 0xFFFF)
+    data += struct.pack("<H", y & 0xFFFF)
+
+    return bytes(data)
+
+
+def build_fast_path_input_pdu(events: list[bytes]) -> bytes:
+    """Build a fast-path input PDU containing multiple events.
+
+    Args:
+        events: List of fast-path event data (from build_fast_path_mouse_event, etc.)
+
+    Returns:
+        Complete fast-path input PDU ready to send.
+    """
+    num_events = len(events)
+    if num_events == 0:
+        return b""
+
+    # Concatenate all events
+    events_data = b"".join(events)
+
+    # Build header
+    # fpInputHeader: action (2 bits) | numEvents (4 bits) | flags (2 bits)
+    # action = 0 (FASTPATH_INPUT_ACTION_FASTPATH)
+    # flags = 0 (no encryption for Enhanced RDP Security / TLS)
+    # numEvents = number of events if <= 15, else 0 (use separate numEvents field)
+
+    if num_events <= 15:
+        # Pack numEvents into header
+        fp_input_header = (num_events << 2) | 0  # action=0, flags=0
+        header_data = bytes([fp_input_header])
+        extra_num_events = b""
+    else:
+        # numEvents = 0 in header, use separate field
+        fp_input_header = 0
+        header_data = bytes([fp_input_header])
+        extra_num_events = bytes([num_events])
+
+    # Calculate total length: header + length field(s) + numEvents(optional) + events
+    # We need to determine length field size first
+    content = extra_num_events + events_data
+    # Total = fpInputHeader(1) + length(1 or 2) + content
+    total_len_with_1byte = 1 + 1 + len(content)
+    total_len_with_2byte = 1 + 2 + len(content)
+
+    if total_len_with_1byte <= 127:
+        # Single byte length
+        length_data = bytes([total_len_with_1byte])
+    else:
+        # Two byte length (big-endian, high bit set on length1)
+        total_len = total_len_with_2byte
+        length1 = 0x80 | ((total_len >> 8) & 0x7F)
+        length2 = total_len & 0xFF
+        length_data = bytes([length1, length2])
+
+    return header_data + length_data + content
+
+
 def build_confirm_active_pdu(
     share_id: int,
     originator_id: int,
