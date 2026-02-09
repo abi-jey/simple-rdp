@@ -99,7 +99,7 @@ Server → Client: Font Map PDU
 After finalization, the connection is established:
 
 - Server sends bitmap updates (Fast-Path or Slow-Path)
-- Client sends input events (keyboard, mouse)
+- Client sends input events (Fast-Path for mouse, Slow-Path for keyboard)
 
 ## Implemented Features
 
@@ -114,13 +114,18 @@ After finalization, the connection is established:
 
 ### Input Events
 
-| Event Type | Implemented |
-|------------|-------------|
-| Keyboard Scancode | ✅ |
-| Keyboard Unicode | ✅ |
-| Mouse Movement | ✅ |
-| Mouse Button | ✅ |
-| Mouse Wheel | ✅ |
+| Event Type | Path | Implemented |
+|------------|------|-------------|
+| Keyboard Scancode | Slow-Path | ✅ |
+| Keyboard Unicode | Slow-Path | ✅ |
+| Mouse Movement | Fast-Path | ✅ |
+| Mouse Button | Fast-Path | ✅ |
+| Mouse Wheel | Fast-Path | ✅ |
+
+!!! info "Fast-Path Input"
+    Mouse events use Fast-Path input (TS_FP_POINTER_EVENT) which bypasses
+    TPKT/X.224/MCS headers for lower latency. Each mouse event is sent 
+    immediately without batching for responsive input.
 
 ### Capabilities
 

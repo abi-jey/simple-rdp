@@ -173,6 +173,11 @@ asyncio.run(automation_example())
 
 ## Tips for Reliable Automation
 
+!!! info "Fast-Path Input"
+    All mouse events use RDP Fast-Path input for optimal performance.
+    Events are sent immediately without batching, providing responsive
+    input with minimal latency.
+
 !!! warning "Add delays after actions"
     UI elements need time to respond:
     

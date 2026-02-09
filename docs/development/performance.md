@@ -177,7 +177,13 @@ Typical bandwidth usage:
 
 ### Latency
 
-Input events are sent immediately. For responsive automation:
+Mouse events use Fast-Path input for minimal latency:
+
+- **Fast-Path**: Mouse events bypass TPKT/X.224/MCS headers (7 bytes per event vs ~30+ bytes slow-path)
+- **Immediate Send**: Each mouse event is sent immediately without batching
+- **No Timestamps**: Fast-path events don't include timestamps, reducing overhead
+
+For responsive automation:
 
 - LAN: < 10ms latency ideal
 - VPN: 50-100ms acceptable
