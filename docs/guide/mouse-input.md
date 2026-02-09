@@ -174,9 +174,19 @@ asyncio.run(automation_example())
 ## Tips for Reliable Automation
 
 !!! info "Fast-Path Input"
-    All mouse events use RDP Fast-Path input for optimal performance.
+    All mouse events use RDP Fast-Path input by default for optimal performance.
     Events are sent immediately without batching, providing responsive
     input with minimal latency.
+    
+    If you encounter compatibility issues with older RDP servers, you can
+    disable fast-path input:
+    
+    ```python
+    client = RDPClient(
+        host="192.168.1.100",
+        use_fast_path_input=False,  # Use slow-path for compatibility
+    )
+    ```
 
 !!! warning "Add delays after actions"
     UI elements need time to respond:

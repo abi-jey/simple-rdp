@@ -37,6 +37,7 @@ from simple_rdp.mcs import parse_mcs_channel_join_confirm
 from simple_rdp.mcs import parse_mcs_connect_response
 from simple_rdp.pdu import CTRLACTION_COOPERATE
 from simple_rdp.pdu import CTRLACTION_REQUEST_CONTROL
+from simple_rdp.pdu import INPUT_EVENT_MOUSE
 from simple_rdp.pdu import INPUT_EVENT_SCANCODE
 from simple_rdp.pdu import INPUT_EVENT_UNICODE
 from simple_rdp.pdu import PDUTYPE2_CONTROL
@@ -57,6 +58,7 @@ from simple_rdp.pdu import build_fast_path_input_pdu
 from simple_rdp.pdu import build_fast_path_mouse_event
 from simple_rdp.pdu import build_font_list_pdu
 from simple_rdp.pdu import build_input_event_pdu
+from simple_rdp.pdu import build_mouse_event
 from simple_rdp.pdu import build_refresh_rect_pdu
 from simple_rdp.pdu import build_scancode_event
 from simple_rdp.pdu import build_suppress_output_pdu
@@ -212,6 +214,7 @@ class RDPClient:
         show_wallpaper: bool = False,
         capture_fps: int = 30,
         record_to: str | None = None,
+        use_fast_path_input: bool = True,
     ) -> None:
         """Initialize the RDP client.
 
@@ -229,6 +232,9 @@ class RDPClient:
             record_to: If provided, save the session recording to this path (MP4) on disconnect.
                       The recording is always captured to a temp file; this controls whether
                       it's transcoded and saved when the session ends.
+            use_fast_path_input: Whether to use fast-path for mouse input (default: True).
+                                Fast-path bypasses TPKT/X.224/MCS headers for lower latency.
+                                Set to False to use slow-path if compatibility issues arise.
 
         """
         self._host = host
@@ -241,6 +247,7 @@ class RDPClient:
         self._color_depth = color_depth
         self._show_wallpaper = show_wallpaper
         self._record_to = record_to
+        self._use_fast_path_input = use_fast_path_input
         self._connected = False
         self._tcp_reader: StreamReader | None = None
         self._tcp_writer: StreamWriter | None = None
@@ -803,8 +810,7 @@ class RDPClient:
             y: Y coordinate.
 
         """
-        event = build_fast_path_mouse_event(x, y, button=0, is_move=True)
-        await self._send_fast_path_input([event])
+        await self._send_mouse_event(x, y, button=0, is_move=True)
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
@@ -826,37 +832,29 @@ class RDPClient:
 
         """
         # Move to position
-        await self._send_fast_path_input([build_fast_path_mouse_event(x, y, button=0, is_move=True)])
+        await self._send_mouse_event(x, y, button=0, is_move=True)
 
         # First click down
-        await self._send_fast_path_input(
-            [build_fast_path_mouse_event(x, y, button=button, is_down=True, is_move=False)]
-        )
+        await self._send_mouse_event(x, y, button=button, is_down=True, is_move=False)
 
         # Delay between press and release
         await asyncio.sleep(0.05)
 
         # First click up
-        await self._send_fast_path_input(
-            [build_fast_path_mouse_event(x, y, button=button, is_down=False, is_move=False)]
-        )
+        await self._send_mouse_event(x, y, button=button, is_down=False, is_move=False)
 
         if double_click:
             # Delay between first and second click
             await asyncio.sleep(0.1)
 
             # Second click down
-            await self._send_fast_path_input(
-                [build_fast_path_mouse_event(x, y, button=button, is_down=True, is_move=False)]
-            )
+            await self._send_mouse_event(x, y, button=button, is_down=True, is_move=False)
 
             # Delay between press and release
             await asyncio.sleep(0.05)
 
             # Second click up
-            await self._send_fast_path_input(
-                [build_fast_path_mouse_event(x, y, button=button, is_down=False, is_move=False)]
-            )
+            await self._send_mouse_event(x, y, button=button, is_down=False, is_move=False)
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
@@ -871,8 +869,7 @@ class RDPClient:
 
         """
         button_num = self._normalize_button(button)
-        event = build_fast_path_mouse_event(x, y, button=button_num, is_down=True, is_move=False)
-        await self._send_fast_path_input([event])
+        await self._send_mouse_event(x, y, button=button_num, is_down=True, is_move=False)
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
@@ -887,8 +884,7 @@ class RDPClient:
 
         """
         button_num = self._normalize_button(button)
-        event = build_fast_path_mouse_event(x, y, button=button_num, is_down=False, is_move=False)
-        await self._send_fast_path_input([event])
+        await self._send_mouse_event(x, y, button=button_num, is_down=False, is_move=False)
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
@@ -902,8 +898,7 @@ class RDPClient:
             delta: Wheel delta (positive=up, negative=down). Standard is +/-120 per notch.
 
         """
-        event = build_fast_path_mouse_event(x, y, button=0, is_move=False, wheel_delta=delta)
-        await self._send_fast_path_input([event])
+        await self._send_mouse_event(x, y, button=0, is_move=False, wheel_delta=delta)
 
         # Update local pointer position for compositing
         self._display.update_pointer(x=x, y=y)
@@ -924,26 +919,22 @@ class RDPClient:
 
         """
         # Move to start position
-        await self._send_fast_path_input([build_fast_path_mouse_event(x1, y1, button=0, is_move=True)])
+        await self._send_mouse_event(x1, y1, button=0, is_move=True)
 
         # Button down
-        await self._send_fast_path_input(
-            [build_fast_path_mouse_event(x1, y1, button=button, is_down=True, is_move=False)]
-        )
+        await self._send_mouse_event(x1, y1, button=button, is_down=True, is_move=False)
 
         # Small delay before moving
         await asyncio.sleep(0.05)
 
         # Move to end position
-        await self._send_fast_path_input([build_fast_path_mouse_event(x2, y2, button=0, is_move=True)])
+        await self._send_mouse_event(x2, y2, button=0, is_move=True)
 
         # Small delay before release
         await asyncio.sleep(0.05)
 
         # Button up
-        await self._send_fast_path_input(
-            [build_fast_path_mouse_event(x2, y2, button=button, is_down=False, is_move=False)]
-        )
+        await self._send_mouse_event(x2, y2, button=button, is_down=False, is_move=False)
 
         # Update local pointer position for compositing (final position)
         self._display.update_pointer(x=x2, y=y2)
@@ -1838,6 +1829,28 @@ class RDPClient:
         pdu = build_fast_path_input_pdu(events)
         self._writer.write(pdu)
         await self._writer.drain()
+
+    async def _send_mouse_event(
+        self,
+        x: int,
+        y: int,
+        button: int = 0,
+        is_down: bool = False,
+        is_move: bool = True,
+        wheel_delta: int = 0,
+    ) -> None:
+        """Send a mouse event using fast-path or slow-path based on configuration."""
+        if self._use_fast_path_input:
+            event = build_fast_path_mouse_event(
+                x, y, button=button, is_down=is_down, is_move=is_move, wheel_delta=wheel_delta
+            )
+            await self._send_fast_path_input([event])
+        else:
+            event_time = int(time.time() * 1000) & 0xFFFFFFFF
+            event_data = build_mouse_event(
+                x, y, button=button, is_down=is_down, is_move=is_move, wheel_delta=wheel_delta
+            )
+            await self._send_input_events([(event_time, INPUT_EVENT_MOUSE, event_data)])
 
     # ==================== PDU Building Helpers ====================
 

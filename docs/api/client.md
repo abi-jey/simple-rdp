@@ -17,6 +17,7 @@ RDPClient(
     show_wallpaper: bool = False,
     capture_fps: int = 30,
     record_to: str | None = None,
+    use_fast_path_input: bool = True,
 )
 ```
 
@@ -35,6 +36,7 @@ RDPClient(
 | `show_wallpaper` | `bool` | `False` | Show desktop wallpaper |
 | `capture_fps` | `int` | `30` | Target FPS for video capture |
 | `record_to` | `str \| None` | `None` | Path to save recording on disconnect |
+| `use_fast_path_input` | `bool` | `True` | Use fast-path for mouse input (lower latency) |
 
 ### Example
 

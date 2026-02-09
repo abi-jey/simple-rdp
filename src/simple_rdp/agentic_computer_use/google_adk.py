@@ -12,6 +12,9 @@ from typing import Any
 from typing import Union
 
 if TYPE_CHECKING:
+    from simple_rdp.client import RDPClient
+
+try:
     from google.adk.agents.run_config import RunConfig
     from google.adk.events.event import Event
     from google.adk.models.base_llm import BaseLlm
@@ -19,6 +22,11 @@ if TYPE_CHECKING:
     from google.adk.sessions import Session
     from google.adk.sessions.base_session_service import BaseSessionService
     from google.genai.types import Content
+    from google.genai.types import Part
+except ImportError as err:
+    raise ImportError(
+        "google-adk package is required for AdkExternalCompaction. Please install it with 'pip install google-adk'."
+    ) from err
 
 logger = getLogger(__name__)
 
@@ -127,10 +135,6 @@ def _process_target(prompt: str, model_config: dict[str, Any], result_queue: "mu
         result_queue.put("")
 
 
-if TYPE_CHECKING:
-    from google.genai.types import Part
-
-    from simple_rdp import RDPClient
 # Type alias for async tool functions with varying signatures
 AgenticTool = Callable[..., Coroutine[object, object, list["Part"] | str]]
 
@@ -222,7 +226,7 @@ def wrap_client_methods_for_google_adk(client: "RDPClient", log_reasoning: bool 
 
     async def get_machine_info() -> str:
         """Get machine information such as screen resolution."""
-        info = await client.get_computer_info()
+        info: str = await client.get_computer_info()
         return info
 
     tools.append(get_machine_info)
