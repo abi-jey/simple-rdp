@@ -24,6 +24,8 @@
   instead of ADK's broad `extensions` extra, whose CrewAI dependency conflicts
   on Python 3.11.
 - Add regression coverage and run recording tests with ffmpeg on Linux CI.
+- Bound CI utility waits and avoid reinstalling ffmpeg on runners that already
+  provide it; a stalled coverage service does not block package builds.
 
 Known follow-ups: configurable TLS certificate validation (#12) and correcting
 the separate dev-release artifact publishing path (#13).
