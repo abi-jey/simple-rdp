@@ -55,6 +55,7 @@
 
 ```python
 import simple_rdp
+
 print(simple_rdp.__version__)
 ```
 

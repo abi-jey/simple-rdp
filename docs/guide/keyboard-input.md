@@ -207,8 +207,8 @@ await client.send_key("alt", mode="release")
     
     ```python
     await client.send_text("こんにちは")  # Japanese
-    await client.send_text("Привет")      # Russian
-    await client.send_text("مرحبا")        # Arabic
+    await client.send_text("Привет")  # Russian
+    await client.send_text("مرحبا")  # Arabic
     ```
 
 !!! tip "Verify with screenshots"

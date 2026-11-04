@@ -113,6 +113,7 @@ pixels = list(img.getdata())
 
 # Convert to numpy array (with numpy installed)
 import numpy as np
+
 arr = np.array(img)
 ```
 
@@ -245,6 +246,7 @@ print(f"Buffer size: {display.video_buffer_size_mb:.2f} MB")
 latest = display.get_latest_frame()
 if latest:
     print(f"Frame size: {latest.width}x{latest.height}")
+
 
 # Stream video chunks (for WebSocket, etc.)
 async def stream_chunks():

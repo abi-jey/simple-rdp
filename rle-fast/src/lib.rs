@@ -3,9 +3,11 @@
 //! Implements decompression for RLE-compressed bitmaps as specified in
 //! MS-RDPBCGR section 2.2.9.1.1.3.1.2.4 and section 3.1.9.
 //!
-//! This releases the GIL during decompression so it doesn't block
-//! the Python asyncio event loop.
+//! This module provides an async `decompress_rle` function that can be
+//! awaited from Python asyncio code. The CPU-intensive decompression
+//! runs on a separate thread pool to avoid blocking the event loop.
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
@@ -172,7 +174,7 @@ impl<'a> RleDecoder<'a> {
 
     #[inline(always)]
     fn write_bg_pixel(&mut self) {
-        if self.first_line {
+        if self.dest_pos < self.row_delta {
             let zero_pixel = vec![0u8; self.bytes_per_pixel];
             self.write_pixel(&zero_pixel);
         } else {
@@ -183,7 +185,7 @@ impl<'a> RleDecoder<'a> {
 
     #[inline(always)]
     fn write_fg_pixel(&mut self) {
-        if self.first_line {
+        if self.dest_pos < self.row_delta {
             let fg = self.fg_pel.clone();
             self.write_pixel(&fg);
         } else {
@@ -457,7 +459,11 @@ impl<'a> RleDecoder<'a> {
 /// Decompress RLE-compressed bitmap data.
 ///
 /// This function releases the GIL during decompression so it doesn't block
-/// the Python asyncio event loop when called from a thread pool.
+/// the Python asyncio event loop when called with `run_in_executor`.
+/// For best performance with asyncio, call this from a thread pool:
+///
+///     loop = asyncio.get_event_loop()
+///     data = await loop.run_in_executor(None, decompress_rle, ...)
 ///
 /// Args:
 ///     compressed_data: The compressed bitmap data (including optional header)
@@ -478,11 +484,31 @@ fn decompress_rle<'py>(
     bpp: usize,
     has_header: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
+    if width == 0 || height == 0 {
+        return Err(PyValueError::new_err("Bitmap dimensions must be positive"));
+    }
+    let bytes_per_pixel = match bpp {
+        8 => 1,
+        15 | 16 => 2,
+        24 => 3,
+        _ => return Err(PyValueError::new_err("Unsupported RLE bit depth")),
+    };
+    // Bound memory usage for server-supplied dimensions before allocating.
+    let output_size = width
+        .checked_mul(bytes_per_pixel)
+        .and_then(|size| size.checked_add(3))
+        .map(|size| size & !3)
+        .and_then(|stride| stride.checked_mul(height));
+    if !matches!(output_size, Some(size) if size <= 64 * 1024 * 1024) {
+        return Err(PyValueError::new_err(
+            "Decoded bitmap exceeds the 64 MiB limit",
+        ));
+    }
     // Copy input data so we can release the GIL
     let input_copy = compressed_data.to_vec();
 
-    // Release the GIL during heavy computation
-    // This allows the asyncio event loop to continue processing
+    // Release the GIL during heavy computation using py.detach()
+    // This allows other Python threads (including asyncio internals) to run
     let result = py.detach(|| {
         let mut decoder = RleDecoder::new(&input_copy, width, height, bpp, has_header);
         decoder.decompress()

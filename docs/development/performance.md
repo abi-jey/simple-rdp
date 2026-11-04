@@ -125,6 +125,7 @@ Cursor images are cached to avoid re-parsing:
 
 ```python
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 ```
 
@@ -134,13 +135,15 @@ logging.basicConfig(level=logging.DEBUG)
 import cProfile
 import asyncio
 
+
 async def benchmark():
     async with RDPClient(...) as client:
         await asyncio.sleep(2)
         for _ in range(100):
             await client.screenshot()
 
-cProfile.run('asyncio.run(benchmark())')
+
+cProfile.run("asyncio.run(benchmark())")
 ```
 
 ### Measure FPS
@@ -148,17 +151,18 @@ cProfile.run('asyncio.run(benchmark())')
 ```python
 import time
 
+
 async def measure_fps():
     async with RDPClient(...) as client:
         await asyncio.sleep(2)
-        
+
         start = time.time()
         count = 0
-        
+
         while time.time() - start < 10:  # 10 second test
             await client.screenshot()
             count += 1
-        
+
         fps = count / 10
         print(f"FPS: {fps:.1f}")
 ```

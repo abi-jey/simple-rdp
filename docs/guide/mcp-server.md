@@ -278,6 +278,7 @@ from simple_rdp_mcp import (
     send_key,
 )
 
+
 async def automate_rdp():
     # Connect to RDP server
     await connect(
@@ -286,25 +287,26 @@ async def automate_rdp():
         password="password",
         record_session="/tmp/session.mp4",  # Optional recording
     )
-    
+
     # Take a screenshot
     img = await screenshot()
     img.save("desktop.png")
-    
+
     # Click on something
     await mouse_click(100, 200)
-    
+
     # Type some text
     await type_text("Hello, World!")
-    
+
     # Press Enter
     await send_key("enter")
-    
+
     # Use keyboard shortcuts
     await send_key("s", modifiers=["ctrl"])  # Ctrl+S
-    
+
     # Disconnect (saves recording if enabled)
     await disconnect()
+
 
 asyncio.run(automate_rdp())
 ```
@@ -315,16 +317,18 @@ asyncio.run(automate_rdp())
 import asyncio
 from simple_rdp_mcp import connect, screenshot, mouse_click, disconnect
 
+
 async def main():
     await connect("192.168.1.100", "user", "pass")
-    
+
     # Run your automation
     for i in range(10):
         img = await screenshot()
         print(f"Frame {i}: {img.size}")
         await asyncio.sleep(1)
-    
+
     await disconnect()
+
 
 # Run in existing event loop
 loop = asyncio.get_event_loop()

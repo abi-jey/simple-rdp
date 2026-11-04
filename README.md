@@ -136,6 +136,7 @@ from simple_rdp import RDPClient
 
 load_dotenv()
 
+
 async def main():
     async with RDPClient(
         host=os.environ["RDP_HOST"],
@@ -143,13 +144,14 @@ async def main():
         password=os.environ["RDP_PASS"],
     ) as client:
         print("Streaming video...")
-        
+
         # Consume real-time video chunks (fragmented MP4)
         while client.is_connected:
             chunk = await client.get_next_video_chunk(timeout=1.0)
             if chunk:
                 # Send chunk.data to websocket, write to file, etc.
                 pass
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -273,6 +273,7 @@ class RDPClient:
         self._receive_task: asyncio.Task[None] | None = None
         self._capture_task: asyncio.Task[None] | None = None
         self._running = False
+        self._disconnect_lock = asyncio.Lock()
 
         # Capture settings
         self._capture_fps = capture_fps
@@ -401,6 +402,17 @@ class RDPClient:
         return self._display.is_consumer_behind(threshold)
 
     async def connect(self) -> None:
+        """Establish a connection, cleaning up if setup fails or is cancelled."""
+        if self._tcp_writer is not None:
+            raise ConnectionError("Client already has an open connection")
+        try:
+            await self._connect()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await self.disconnect()
+            raise
+
+    async def _connect(self) -> None:
         """Establish connection to the RDP server.
 
         Raises:
@@ -450,15 +462,13 @@ class RDPClient:
         # Start video streaming (always on - records to temp file)
         await self._display.start_streaming()
 
-        # Start receive loop and capture loop
-        self._running = True
-        self._receive_task = asyncio.create_task(self._receive_loop())
-        self._capture_task = asyncio.create_task(self._capture_loop())
-
         # Request initial screen content
         await self._request_screen_refresh()
 
         self._connected = True
+        self._running = True
+        self._receive_task = asyncio.create_task(self._receive_loop())
+        self._capture_task = asyncio.create_task(self._capture_loop())
         logger.info("RDP connection established successfully")
 
     async def disconnect(self) -> None:
@@ -467,22 +477,29 @@ class RDPClient:
         If record_to was provided in __init__, the session recording is
         transcoded to MP4 and saved to that path.
         """
-        self._running = False
+        async with self._disconnect_lock:
+            await self._disconnect()
 
-        # Stop streaming and optionally save recording
-        if self._display.is_streaming:
-            await self._display.stop_streaming(record_to=self._record_to)
+    async def _disconnect(self) -> None:
+        """Release resources once, including when the receive task detects EOF."""
+        self._running = False
+        self._connected = False
 
         # Stop capture task
         if self._capture_task:
             self._capture_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._capture_task
+            self._capture_task = None
 
-        if self._receive_task:
+        if self._receive_task and self._receive_task is not asyncio.current_task():
             self._receive_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._receive_task
+        self._receive_task = None
+
+        # Stop the producer before draining the encoder.
+        await self._display.stop_streaming(record_to=self._record_to)
 
         if self._tcp_writer:
             self._tcp_writer.close()
@@ -748,11 +765,7 @@ class RDPClient:
         else:
             # Send as unicode event (single character)
             assert isinstance(key, str) and len(key) == 1
-            code = ord(key)
-            if is_press:
-                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=False)))
-            if is_release:
-                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=True)))
+            events.extend(self._unicode_events(key, event_time, is_press, is_release))
 
         if events:
             await self._send_input_events(events)
@@ -778,6 +791,19 @@ class RDPClient:
 
             asyncio.create_task(auto_release())
 
+    @staticmethod
+    def _unicode_events(
+        text: str, event_time: int, is_press: bool = True, is_release: bool = True
+    ) -> list[tuple[int, int, bytes]]:
+        """Encode Unicode input as UTF-16 code units, including surrogate pairs."""
+        events = []
+        for (code,) in struct.iter_unpack("<H", text.encode("utf-16-le")):
+            if is_press:
+                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=False)))
+            if is_release:
+                events.append((event_time, INPUT_EVENT_UNICODE, build_unicode_event(code, is_release=True)))
+        return events
+
     async def send_text(self, text: str, chars_per_second: float = 10.0) -> None:
         """Send a text string as keyboard input.
 
@@ -797,7 +823,8 @@ class RDPClient:
         delay = 1.0 / chars_per_second if chars_per_second > 0 else 0
 
         for i, char in enumerate(text):
-            await self.send_key(char)
+            event_time = int(time.time() * 1000) & 0xFFFFFFFF
+            await self._send_input_events(self._unicode_events(char, event_time))
             # Add delay between characters (not after the last one)
             if delay > 0 and i < len(text) - 1:
                 await asyncio.sleep(delay)
@@ -969,14 +996,18 @@ class RDPClient:
         await self._writer.drain()
         logger.debug("Sent X.224 Connection Request")
 
-        response = await self._reader.read(1024)
+        header = await self._reader.readexactly(4)
+        length = int.from_bytes(header[2:4], "big")
+        if header[:2] != b"\x03\x00" or length < 19:
+            raise ConnectionError("Invalid X.224 response header")
+        response = header + await self._reader.readexactly(length - 4)
         protocol = await self._parse_x224_response(response)
         self.connection_properties["protocol"] = protocol
         logger.info(f"X.224 negotiation completed, protocol: {protocol!r}")
 
     async def _parse_x224_response(self, data: bytes) -> bytes:
         """Parse the X.224 response from the RDP server."""
-        if len(data) < 11:
+        if len(data) < 19:
             raise ConnectionError("Invalid X.224 response from server.")
         type_code = data[11]
         if type_code not in (0x02, 0x03):
@@ -987,7 +1018,7 @@ class RDPClient:
             logger.debug(f"Server selected protocol: {selected_proto!r}")
             return selected_proto
         if type_code == 0x03:
-            logger.info(f"Server RDP negotiation failed, code: {data[14]}")
+            logger.info(f"Server RDP negotiation failed, code: {int.from_bytes(data[15:19], 'little')}")
             raise ConnectionError("RDP negotiation failed as per server response.")
         raise ConnectionError(f"Unhandled X.224 response type: data: {data!r}")
 
@@ -1396,16 +1427,20 @@ class RDPClient:
         """Main loop to receive and process server PDUs."""
         while self._running:
             try:
-                response = await asyncio.wait_for(self._recv_x224_data(), timeout=1.0)
+                # A timeout here can consume a header and discard its parser state.
+                # disconnect() cancels this task when an idle connection must close.
+                response = await self._recv_x224_data()
                 await self._process_server_pdu(response)
-            except TimeoutError:
-                continue
             except asyncio.CancelledError:
+                break
+            except (ConnectionError, asyncio.IncompleteReadError, OSError) as e:
+                logger.info(f"RDP connection closed: {e}")
+                await self.disconnect()
                 break
             except Exception as e:
                 logger.error(f"Error in receive loop: {e}")
-                if not self._running:
-                    break
+                await self.disconnect()
+                break
 
     async def _process_server_pdu(self, data: bytes) -> None:
         """Process a PDU received from the server."""
@@ -1927,6 +1962,8 @@ class RDPClient:
             # TPKT/Slow-path: Read remaining 3 bytes of TPKT header
             header_rest = await self._reader.readexactly(3)
             length = (header_rest[1] << 8) | header_rest[2]
+            if header_rest[0] != 0 or length < 7:
+                raise ConnectionError("Invalid TPKT header")
             remaining = length - 4
 
             data = await self._reader.readexactly(remaining)
@@ -1988,9 +2025,7 @@ class RDPClient:
 
     async def _recv_credssp_message(self) -> bytes:
         """Receive a CredSSP message from the server."""
-        header = await self._reader.read(2)
-        if len(header) < 2:
-            raise ConnectionError("Failed to read CredSSP message header")
+        header = await self._reader.readexactly(2)
 
         if header[0] != 0x30:
             raise ConnectionError(f"Invalid CredSSP message: expected SEQUENCE, got {header[0]:#x}")
@@ -1999,19 +2034,17 @@ class RDPClient:
             total_length = header[1]
             length_bytes = 0
         elif header[1] == 0x81:
-            length_data = await self._reader.read(1)
+            length_data = await self._reader.readexactly(1)
             total_length = length_data[0]
             length_bytes = 1
         elif header[1] == 0x82:
-            length_data = await self._reader.read(2)
+            length_data = await self._reader.readexactly(2)
             total_length = (length_data[0] << 8) | length_data[1]
             length_bytes = 2
         else:
             raise ConnectionError(f"Unsupported ASN.1 length encoding: {header[1]:#x}")
 
-        content = await self._reader.read(total_length)
-        if len(content) < total_length:
-            raise ConnectionError("Incomplete CredSSP message received")
+        content = await self._reader.readexactly(total_length)
 
         if length_bytes == 0:
             return header + content

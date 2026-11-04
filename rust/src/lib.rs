@@ -7,6 +7,7 @@
 //! awaited from Python asyncio code. The CPU-intensive decompression
 //! runs on a separate thread pool to avoid blocking the event loop.
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
@@ -173,7 +174,7 @@ impl<'a> RleDecoder<'a> {
 
     #[inline(always)]
     fn write_bg_pixel(&mut self) {
-        if self.first_line {
+        if self.dest_pos < self.row_delta {
             let zero_pixel = vec![0u8; self.bytes_per_pixel];
             self.write_pixel(&zero_pixel);
         } else {
@@ -184,7 +185,7 @@ impl<'a> RleDecoder<'a> {
 
     #[inline(always)]
     fn write_fg_pixel(&mut self) {
-        if self.first_line {
+        if self.dest_pos < self.row_delta {
             let fg = self.fg_pel.clone();
             self.write_pixel(&fg);
         } else {
@@ -483,6 +484,26 @@ fn decompress_rle<'py>(
     bpp: usize,
     has_header: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
+    if width == 0 || height == 0 {
+        return Err(PyValueError::new_err("Bitmap dimensions must be positive"));
+    }
+    let bytes_per_pixel = match bpp {
+        8 => 1,
+        15 | 16 => 2,
+        24 => 3,
+        _ => return Err(PyValueError::new_err("Unsupported RLE bit depth")),
+    };
+    // Bound memory usage for server-supplied dimensions before allocating.
+    let output_size = width
+        .checked_mul(bytes_per_pixel)
+        .and_then(|size| size.checked_add(3))
+        .map(|size| size & !3)
+        .and_then(|stride| stride.checked_mul(height));
+    if !matches!(output_size, Some(size) if size <= 64 * 1024 * 1024) {
+        return Err(PyValueError::new_err(
+            "Decoded bitmap exceeds the 64 MiB limit",
+        ));
+    }
     // Copy input data so we can release the GIL
     let input_copy = compressed_data.to_vec();
 

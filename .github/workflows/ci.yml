@@ -48,7 +48,7 @@ jobs:
           python-version: '3.12'
       
       - name: Install dependencies
-        run: pip install toml
+        run: pip install toml uv poetry
       
       - name: Bump version
         id: bump
@@ -95,12 +95,17 @@ jobs:
       
       - name: Update Cargo.lock
         run: cargo generate-lockfile
+
+      - name: Update Python lockfiles
+        run: |
+          uv lock
+          poetry lock
       
       - name: Commit and push version bump
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add pyproject.toml Cargo.toml Cargo.lock
+          git add pyproject.toml Cargo.toml Cargo.lock uv.lock poetry.lock
           git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}"
           git push
 
@@ -175,6 +180,25 @@ jobs:
       
       - name: Install test dependencies
         run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+
+      - name: Install recording test dependencies
+        timeout-minutes: 5
+        run: |
+          if command -v ffmpeg; then
+            exit 0
+          fi
+          pip install imageio-ffmpeg
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from imageio_ffmpeg import get_ffmpeg_exe
+
+          bin_dir = Path(os.environ["RUNNER_TEMP"]) / "ffmpeg-bin"
+          bin_dir.mkdir(exist_ok=True)
+          (bin_dir / "ffmpeg").symlink_to(get_ffmpeg_exe())
+          with open(os.environ["GITHUB_PATH"], "a") as output:
+              output.write(f"{bin_dir}\n")
+          PY
       
       - name: Run tests
         run: |
@@ -185,6 +209,8 @@ jobs:
       
       - name: Upload coverage
         if: matrix.python-version == '3.12'
+        timeout-minutes: 3
+        continue-on-error: true
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml

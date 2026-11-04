@@ -27,8 +27,8 @@ Set the remote desktop resolution:
 ```python
 client = RDPClient(
     host="...",
-    width=1920,      # Horizontal resolution
-    height=1080,     # Vertical resolution
+    width=1920,  # Horizontal resolution
+    height=1080,  # Vertical resolution
 )
 ```
 

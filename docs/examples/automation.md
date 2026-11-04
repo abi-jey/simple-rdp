@@ -130,12 +130,13 @@ async def navigate_menu(client, *items):
 async def scroll_and_capture(client, output_dir, num_pages=5):
     """Scroll through content and capture each page."""
     import os
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     for i in range(num_pages):
         # Capture current view
         await client.save_screenshot(f"{output_dir}/page_{i:03d}.png")
-        
+
         # Scroll down (Page Down)
         await client.send_key(0xE051)
         await asyncio.sleep(0.5)
