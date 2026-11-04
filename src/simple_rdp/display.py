@@ -750,13 +750,22 @@ class Display:
         logger.info(f"Starting streaming encoder: {self._width}x{self._height} @ {self._fps}fps (fMP4)")
 
         frame_size = self._width * self._height * 3
-        self._ffmpeg_process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=frame_size,
-        )
+        try:
+            self._ffmpeg_process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=frame_size,
+            )
+        except Exception:
+            self._temp_file.close()
+            os.unlink(self._temp_file_path)
+            self._temp_file = None
+            self._temp_file_path = None
+            self._streaming = False
+            self._recording_start_time = None
+            raise
 
         # Start reader task to consume ffmpeg output
         self._reader_task = asyncio.create_task(self._read_video_output())
@@ -782,62 +791,69 @@ class Display:
 
         # Handle recording file
         temp_path = self._temp_file_path
+        preserve_recording = False
         if temp_path and os.path.exists(temp_path):
             if record_to:
                 logger.info(f"Transcoding recording to: {record_to}")
-                success = self.transcode(temp_path, record_to)
+                success = await asyncio.to_thread(self.transcode, temp_path, record_to)
                 if success:
                     logger.info(f"Recording saved to: {record_to}")
                 else:
-                    logger.error(f"Failed to transcode recording to: {record_to}")
+                    preserve_recording = True
+                    logger.error(f"Failed to transcode recording to: {record_to}; source preserved at: {temp_path}")
 
             # Clean up temp file
-            try:
-                os.unlink(temp_path)
-                logger.debug(f"Deleted temp file: {temp_path}")
-            except Exception as e:
-                logger.debug(f"Error deleting temp file: {e}")
+            if not preserve_recording:
+                try:
+                    os.unlink(temp_path)
+                    logger.debug(f"Deleted temp file: {temp_path}")
+                except Exception as e:
+                    logger.debug(f"Error deleting temp file: {e}")
 
-        self._temp_file_path = None
+        if not preserve_recording:
+            self._temp_file_path = None
         self._shutting_down = False
         self._recording_start_time = None
         logger.info("Streaming stopped")
 
     async def _stop_ffmpeg(self) -> None:
         """Internal: stop the ffmpeg process."""
-        # Close temp file
-        if self._temp_file:
-            try:
-                self._temp_file.close()
-            except Exception as e:
-                logger.debug(f"Error closing temp file: {e}")
-            self._temp_file = None
-
-        if self._ffmpeg_process:
-            if self._ffmpeg_process.stdin:
+        process = self._ffmpeg_process
+        if process:
+            if process.stdin:
                 try:
-                    self._ffmpeg_process.stdin.close()
+                    await asyncio.to_thread(process.stdin.close)
                 except Exception as e:
                     logger.debug(f"Error closing ffmpeg stdin: {e}")
 
             try:
-                self._ffmpeg_process.wait(timeout=5)
+                await asyncio.to_thread(process.wait, timeout=5)
             except subprocess.TimeoutExpired:
-                self._ffmpeg_process.kill()
+                process.kill()
+                await asyncio.to_thread(process.wait)
 
-            self._ffmpeg_process = None
-
+        # Readers must consume the final fragments through EOF before closing
+        # either stdout or the recording file.
         if self._reader_task:
-            self._reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reader_task
+            with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(self._reader_task, timeout=2)
             self._reader_task = None
 
         if self._stderr_task:
-            self._stderr_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._stderr_task
+            with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+                await asyncio.wait_for(self._stderr_task, timeout=2)
             self._stderr_task = None
+
+        if process:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+        self._ffmpeg_process = None
+
+        if self._temp_file:
+            self._temp_file.close()
+            self._temp_file = None
 
     async def _read_ffmpeg_stderr(self) -> None:
         """Read and log ffmpeg stderr for debugging."""
@@ -848,7 +864,7 @@ class Display:
                 return self._ffmpeg_process.stderr.readline()
             return b""
 
-        while self._streaming and self._ffmpeg_process:
+        while self._ffmpeg_process:
             try:
                 line = await loop.run_in_executor(None, _read_stderr)
                 if line:
@@ -856,7 +872,7 @@ class Display:
                     if decoded:
                         logger.debug(f"ffmpeg: {decoded}")
                 else:
-                    await asyncio.sleep(0.1)
+                    break
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -967,10 +983,10 @@ class Display:
 
         def _read_chunk() -> bytes:
             if self._ffmpeg_process and self._ffmpeg_process.stdout:
-                return self._ffmpeg_process.stdout.read(CHUNK_SIZE)
+                return os.read(self._ffmpeg_process.stdout.fileno(), CHUNK_SIZE)
             return b""
 
-        while self._streaming and self._ffmpeg_process:
+        while self._ffmpeg_process:
             try:
                 if self._ffmpeg_process and self._ffmpeg_process.stdout:
                     data = await loop.run_in_executor(None, _read_chunk)
@@ -978,8 +994,7 @@ class Display:
                     data = b""
 
                 if not data:
-                    await asyncio.sleep(0.01)
-                    continue
+                    break
 
                 # Track ffmpeg latency (time from last stdin write to stdout read)
                 if self._last_stdin_write_time > 0:
@@ -1016,7 +1031,7 @@ class Display:
                 break
             except Exception as e:
                 logger.debug(f"Error reading video output: {e}")
-                await asyncio.sleep(0.01)
+                break
 
     async def get_next_video_chunk(self, timeout: float = 1.0) -> VideoChunk | None:
         """Wait for and return the next video chunk.

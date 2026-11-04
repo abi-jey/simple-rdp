@@ -38,15 +38,15 @@ asyncio.run(main())
 
 ```python
 client = RDPClient(
-    host="192.168.1.100",     # RDP server hostname or IP
-    port=3389,                 # RDP port (default: 3389)
-    username="admin",          # Username
-    password="secret",         # Password
-    domain="MYDOMAIN",         # Optional domain
-    width=1920,                # Desktop width (default: 1920)
-    height=1080,               # Desktop height (default: 1080)
-    color_depth=32,            # Color depth: 16, 24, or 32 (default: 32)
-    show_wallpaper=False,      # Disable wallpaper for better performance  # (1)!
+    host="192.168.1.100",  # RDP server hostname or IP
+    port=3389,  # RDP port (default: 3389)
+    username="admin",  # Username
+    password="secret",  # Password
+    domain="MYDOMAIN",  # Optional domain
+    width=1920,  # Desktop width (default: 1920)
+    height=1080,  # Desktop height (default: 1080)
+    color_depth=32,  # Color depth: 16, 24, or 32 (default: 32)
+    show_wallpaper=False,  # Disable wallpaper for better performance  # (1)!
 )
 ```
 

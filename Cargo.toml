@@ -1,6 +1,6 @@
 [package]
 name = "simple-rdp"
-version = "0.8.9"
+version = "0.8.10"
 edition = "2021"
 description = "A Python RDP client for automation - exposes screen capture and input transmission"
 license = "MIT"
@@ -16,7 +16,7 @@ crate-type = [ "cdylib",]
 path = "rust/src/lib.rs"
 
 [dependencies.pyo3]
-version = "0.28"
+version = "0.30.1"
 features = [ "extension-module",]
 
 [profile.release]

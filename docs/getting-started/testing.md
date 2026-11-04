@@ -166,23 +166,23 @@ async def test_connection():
         password="YourPassword",
     ) as client:
         print(f"Connected: {client.width}x{client.height}")
-        
+
         # Wait for desktop to render
         await asyncio.sleep(3)
-        
+
         # Take a screenshot
         img = await client.screenshot()
         img.save("vm_screenshot.png")
         print("Screenshot saved to vm_screenshot.png")
-        
+
         # Test mouse click
         await client.mouse_click(client.width // 2, client.height // 2)
         print("Clicked center of screen")
-        
+
         # Test keyboard
         await client.send_key(0xE05B)  # Windows key
         await asyncio.sleep(0.5)
-        await client.send_key(0x01)    # Escape
+        await client.send_key(0x01)  # Escape
         print("Tested keyboard input")
 
 

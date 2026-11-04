@@ -92,24 +92,26 @@ async def stream_frames():
         if rdp_client and rdp_client.is_connected:
             # Capture screenshot
             img = await rdp_client.screenshot()
-            
+
             # Composite cursor
             img = composite_cursor(img, rdp_client)
-            
+
             # Encode as JPEG
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=70)
             frame_data = base64.b64encode(buffer.getvalue()).decode()
-            
+
             # Send to all connected browsers
             for ws in connected_websockets:
-                await ws.send_json({
-                    "type": "frame",
-                    "data": frame_data,
-                    "width": img.width,
-                    "height": img.height,
-                })
-        
+                await ws.send_json(
+                    {
+                        "type": "frame",
+                        "data": frame_data,
+                        "width": img.width,
+                        "height": img.height,
+                    }
+                )
+
         await asyncio.sleep(0.1)  # ~10 FPS
 ```
 
@@ -119,18 +121,15 @@ async def stream_frames():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    
+
     while True:
         data = await websocket.receive_json()
-        
+
         if data["type"] == "mouse_move":
             await rdp_client.mouse_move(data["x"], data["y"])
-        
+
         elif data["type"] == "mouse_click":
-            await rdp_client.mouse_click(
-                data["x"], data["y"],
-                button=data.get("button", 1)
-            )
+            await rdp_client.mouse_click(data["x"], data["y"], button=data.get("button", 1))
 ```
 
 ### Cursor Compositing
@@ -159,8 +158,8 @@ def composite_cursor(frame: Image.Image, client: RDPClient) -> Image.Image:
 
 ```python
 await asyncio.sleep(0.05)  # ~20 FPS
-await asyncio.sleep(0.1)   # ~10 FPS (default)
-await asyncio.sleep(0.2)   # ~5 FPS
+await asyncio.sleep(0.1)  # ~10 FPS (default)
+await asyncio.sleep(0.2)  # ~5 FPS
 ```
 
 ### Adjust JPEG Quality

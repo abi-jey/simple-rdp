@@ -48,7 +48,7 @@ jobs:
           python-version: '3.12'
       
       - name: Install dependencies
-        run: pip install toml
+        run: pip install toml uv poetry
       
       - name: Bump version
         id: bump
@@ -95,12 +95,17 @@ jobs:
       
       - name: Update Cargo.lock
         run: cargo generate-lockfile
+
+      - name: Update Python lockfiles
+        run: |
+          uv lock
+          poetry lock
       
       - name: Commit and push version bump
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add pyproject.toml Cargo.toml Cargo.lock
+          git add pyproject.toml Cargo.toml Cargo.lock uv.lock poetry.lock
           git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}"
           git push
 
@@ -175,6 +180,9 @@ jobs:
       
       - name: Install test dependencies
         run: pip install pytest pytest-asyncio pytest-cov pyspnego pyasn1 pillow asn1crypto python-dotenv
+
+      - name: Install recording test dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       
       - name: Run tests
         run: |
