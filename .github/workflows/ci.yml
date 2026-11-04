@@ -184,10 +184,21 @@ jobs:
       - name: Install recording test dependencies
         timeout-minutes: 5
         run: |
-          if ! command -v ffmpeg || ! command -v ffprobe; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
+          if command -v ffmpeg; then
+            exit 0
           fi
+          pip install imageio-ffmpeg
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from imageio_ffmpeg import get_ffmpeg_exe
+
+          bin_dir = Path(os.environ["RUNNER_TEMP"]) / "ffmpeg-bin"
+          bin_dir.mkdir(exist_ok=True)
+          (bin_dir / "ffmpeg").symlink_to(get_ffmpeg_exe())
+          with open(os.environ["GITHUB_PATH"], "a") as output:
+              output.write(f"{bin_dir}\n")
+          PY
       
       - name: Run tests
         run: |

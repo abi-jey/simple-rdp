@@ -168,7 +168,7 @@ async def test_failed_encoder_start_cleans_temp_file(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="ffmpeg/ffprobe required")
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg required")
 async def test_short_recording_drains_all_frames(tmp_path) -> None:
     display = Display(64, 64)
     output = tmp_path / "recording.mp4"
@@ -181,23 +181,21 @@ async def test_short_recording_drains_all_frames(tmp_path) -> None:
         await display.stop_streaming(record_to=str(output))
     result = subprocess.run(
         [
-            "ffprobe",
+            "ffmpeg",
             "-v",
             "error",
-            "-count_frames",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=nb_read_frames",
-            "-of",
-            "csv=p=0",
+            "-i",
             str(output),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "pipe:1",
         ],
         capture_output=True,
-        text=True,
         check=True,
     )
-    assert result.stdout.strip() == "10"
+    assert len(result.stdout) == 10 * 64 * 64 * 3
     assert display._temp_file_path is None
 
 
